@@ -38,21 +38,21 @@ std::map<int, Fd_map*> global_fd_table;
 std::map<unsigned long, Plfs_file*> hashed_plfs_files;
 
 void print_tables() {
-    dstream << endl << "PRINT GLOBAL FD TABLE" << endl;
+    dstream << endl << "!! PRINT GLOBAL FD TABLE !!" << endl;
     for (std::map<int, Fd_map*>::const_iterator i=global_fd_table.begin(); i!=global_fd_table.end(); i++) {
         int key = i->first;
         Fd_map* value = i->second;
         dstream << "fake_fd: " << key << endl;
-        dstream << "  fake_path: " << value->fake_path << endl;
-        dstream << "  oflags: " << value->oflags << endl;
-        dstream << "  plfs_file: " << value->plfs_file << endl;
+        dstream << " -> fake_path: " << value->fake_path;
+        dstream << " oflags: " << value->oflags;
+        dstream << " plfs_file: " << value->plfs_file << endl;
     }
-    dstream << endl << "PRINT GLOBAL FD TABLE" << endl;
+    dstream << "!! PRINT PLFS FILE LIST !!" << endl;
     for (std::map<unsigned long, Plfs_file*>::const_iterator i=hashed_plfs_files.begin(); i!=hashed_plfs_files.end(); i++) {
         int key = i->first;
         Plfs_file* value = i->second;
         dstream << "hashed plfs path: " << key << endl;
-        dstream << "  plfs_fd: " << value->plfs_fd << endl;
+        dstream << " -> plfs_fd: " << value->plfs_fd;
         dstream << "  ref_num: " << value->ref_num << endl;
     }
     dstream << "END" << endl << endl;
@@ -141,13 +141,13 @@ int _open(const char *path, int oflags, mode_t mode) {
             ret = fake_fd;
         }
         else {
-            dstream << "- Fake file open failed" << endl;
+            dstream << "- Fake file open/create failed, it returns" << fake_fd << endl;
             ret = -1;
             free(fake_path);
         }
     }
     else {
-        dstream << "- PLFS file open failed" << endl;
+        dstream << "- PLFS file open failed, err = " << err << endl;
         ret = -1;
     }
     dstream << "- open() returns " << ret << endl;
@@ -164,28 +164,52 @@ int _close(int fildes) {
     dstream << "Trying to close file. fake_fd = " << fildes << endl;
     int ret;
     if (global_fd_table.count(fildes) == 0) {
+        dstream << "- Invalid file descriptor, return" << endl;
         ret = -1;
     }
     else {
+        dstream << "- File descriptor found in global fd table" << endl;
         Fd_map* fd_map = global_fd_table[fildes];
         Plfs_fd* plfs_fd = fd_map->plfs_file->plfs_fd;
         int fake_fd = fd_map->fake_fd;
         char* fake_path = fd_map->fake_path;
-        // long hashed_plfs_path = fd_map->hashed_plfs_path;
         int oflags = fd_map->oflags;
-
-        int num_refs;
-
+        Plfs_file* plfs_file = fd_map->plfs_file;
         plfs_error_t err = PLFS_EAGAIN;
-        while (err == PLFS_EAGAIN) err = plfs_close(plfs_fd, getpid(), getuid(), oflags, NULL, &num_refs);
+        while (err == PLFS_EAGAIN) {
+            err = plfs_close(plfs_fd, getpid(), getuid(), oflags, NULL, &(plfs_file->ref_num));
+        }
         if (err != PLFS_SUCCESS) {
+            dstream << "- Close PLFS file failed, err = " << err << endl;
             ret = -1;
         }
         else {
+            dstream << "- Close PLFS file succeed!" << endl;
             ret = close(fake_fd);
-            if (ret == 0) free(fake_path);
+            if (ret == 0) {
+                dstream << "- Close fake file succeed!" << endl;
+                ret = unlink(fake_path);
+                if (ret == 0) {
+                    dstream << "- Unlink fake file succeed!" << endl;
+                    free(fake_path);
+                    free(global_fd_table[fildes]);
+                    global_fd_table.erase(fildes);
+                    if (plfs_file->ref_num == 0) {
+                        dstream << "- Ref = 0, delete the PLFS file" << endl;
+                        hashed_plfs_files.erase(plfs_file->hashed_plfs_path);
+                        free(plfs_file);
+                    }
+                }
+                else {
+                    dstream  << "- Unlink fake file failed, it returns " << ret << endl;
+                }
+            }
+            else {
+                dstream << "- Close fake file failed, it returns " << ret << endl;
+            }
         }
     }
+    dstream << "close() returns " << ret << endl;
     return ret;
 }
 
@@ -194,7 +218,15 @@ int main() {
     int a = _open("/mnt/PLFS/test", O_RDWR);
     int b = _open("/mnt/PLFS/test", O_RDWR);
     int c = _open("/mnt/PLFS/test", O_RDWR);
-    int d = _open("/mnt/PLFS/test2", O_RDWR);
+    int d = _open("/mnt/PLFS/test2", O_RDONLY);
+    print_tables();
+    int e = _close(a);
+    print_tables();
+    e = _close(b);
+    print_tables();
+    e = _close(c);
+    print_tables();
+    e = _close(d);
     print_tables();
     return 0;
 }
