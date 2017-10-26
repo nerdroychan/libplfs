@@ -371,7 +371,7 @@ int _access(const char* path, int mask) {
         errno = plfs_error_to_errno(err);
         ret = (err == PLFS_SUCCESS) ? 0 : -1;
     }
-    else ret = chmod(path, mask);
+    else ret = access(path, mask);
     free(real_path);
     return ret;
 }
