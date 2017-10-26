@@ -38,6 +38,7 @@ struct Fd_map {
     char* fake_path;
     int oflags;
     Plfs_file* plfs_file;
+    // Do not need maintain offset here, use lseek(fake_fd, 0, SEEK_CUR) instead
 };
 
 std::map<int, Fd_map*> global_fd_table;
@@ -100,9 +101,9 @@ unsigned long string_hash(const char *str) {
 
 
 /*
-  A prototype of open() w/ mode
+  A prototype of open() syscall w/ mode
 
-  *** UNDER CONSTRUCTION ***
+  *** EXPERIMENTAL ***
 */
 
 int _open(const char *path, int oflags, mode_t mode) {
@@ -162,11 +163,22 @@ int _open(const char *path, int oflags, mode_t mode) {
     return ret;
 }
 
+/*
+  The w/o mode version of open() sscall
+
+  *** EXPERIMENTAL ***
+*/
 
 int _open(const char *path, int oflags) {
-    return _open(path, oflags, 0600);
+    return _open(path, oflags, 0644);
 }
 
+
+/*
+  A prototype of close() syscall
+
+  *** EXPERIMENTAL ***
+*/
 
 int _close(int fd) {
     if (fd == 0 || fd == 1 || fd == 2) {
@@ -225,12 +237,13 @@ int _close(int fd) {
 }
 
 
+/*
+  A prototype of read() syscall
 
+  *** EXPERIMENTAL ***
+*/
 
-
-// plfs_error_t plfs_read( Plfs_fd *, char *buf, size_t size, off_t offset, ssize_t *bytes_read );
-
-ssize_t _read(int fd, void *buf, size_t nbytes) {
+ssize_t _read(int fd, const void *buf, size_t nbytes) {
     dstream << "Trying to read file. fake_fd = " << fd << endl;
     ssize_t ret;
     if (global_fd_table.count(fd) == 0) {
@@ -247,21 +260,53 @@ ssize_t _read(int fd, void *buf, size_t nbytes) {
             err = plfs_read(plfs_file->plfs_fd, (char*)buf, nbytes, offset, &ret);
         }
         if (err == PLFS_SUCCESS) {
-            lseek(fd, offset+ret, SEEK_SET);
             dstream << "- File read succeed, read " << ret << "bytes" << endl;
+            lseek(fd, offset+ret, SEEK_SET);
+            dstream << "- New offset is " << lseek(fd, 0, SEEK_CUR) << endl;
         }
         else {
             dstream << "- PLFS read failed, it returns " << err;
         }
     }
+    dstream << "read() returns " << ret << endl;
     return ret;
 }
 
 // plfs_error_t plfs_write( Plfs_fd *, const char *, size_t, off_t, pid_t, ssize_t *bytes_written );
+/*
+  A prototype of write() syscall
 
+  *** EXPERIMENTAL ***
+*/
 
-ssize_t write(int fd, const void *buf, size_t nbytes) {
-    return 0;
+ssize_t _write(int fd, const void *buf, size_t nbytes) {
+    dstream << "Trying to write file. fake_fd = " << fd << endl;
+    ssize_t ret;
+    if (global_fd_table.count(fd) == 0) {
+        dstream << "- Invalid file descriptor, return" << endl;
+        ret = 0;
+    }
+    else {
+        dstream << "- File descriptor found in global fd table" << endl;
+        Fd_map* fd_map = global_fd_table[fd];
+        Plfs_file* plfs_file = fd_map->plfs_file;
+        off_t offset = lseek(fd, 0, SEEK_CUR);
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_write(plfs_file->plfs_fd, (const char*)buf, nbytes, offset, getpid(), &ret);
+        }
+        if (err == PLFS_SUCCESS) {
+            dstream << "- File write succeed, write " << ret << "bytes" << endl;
+            lseek(fd, offset+ret, SEEK_SET);
+            dstream << "- New offset is " << lseek(fd, 0, SEEK_CUR) << endl;
+            plfs_sync(plfs_file->plfs_fd);
+        }
+        else {
+            dstream << "- PLFS write failed, it returns " << err;
+        }
+    }
+    dstream << "write() returns " << ret << endl;
+    return ret;
 }
 
 
@@ -274,10 +319,9 @@ int main() {
     char buf[128];
     dstream << _read(a, buf, 4) << endl;
     dstream << buf << endl;
-    dstream << _read(a, buf, 4) << endl;
-    dstream << buf << endl;
-    dstream << _read(b, buf, 4) << endl;
-    dstream << buf << endl;
+    buf[0] = 'f';
+    _write(a, buf, 4);
+    _close(a);
     
 
     return 0;
