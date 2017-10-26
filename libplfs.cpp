@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <map>
 #include <string>
 #include <iostream>
@@ -21,8 +22,8 @@
 
 
 // TODO LIST:
-// 1. resolve absolute path and relative path
-// 2. Offset issue
+// C++ FILE*
+// What can I do with errno?
 
 std::ostream cnull(0); // A temporary solution for /dev/null like stream
 
@@ -130,6 +131,7 @@ int _open(const char *path, int oflags, mode_t mode) {
     while (err == PLFS_EAGAIN) {
         err = plfs_open(&plfs_fd, real_path, oflags, getpid(), mode, NULL);
     }
+    errno = plfs_error_to_errno(err);
     if (err == PLFS_SUCCESS) {
         dstream << "- Open PLFS file succeed! plfs_fd = " << plfs_fd << endl;
         char* fake_path = gen_rand_path();
@@ -209,6 +211,7 @@ int _close(int fd) {
         while (err == PLFS_EAGAIN) {
             err = plfs_close(plfs_fd, getpid(), getuid(), oflags, NULL, &(plfs_file->ref_num));
         }
+        errno = plfs_error_to_errno(err);
         if (err != PLFS_SUCCESS) {
             dstream << "- Close PLFS file failed, err = " << err << endl;
             ret = -1;
@@ -267,6 +270,7 @@ ssize_t _read(int fd, void *buf, size_t nbytes) {
         while (err == PLFS_EAGAIN) {
             err = plfs_read(plfs_file->plfs_fd, (char*)buf, nbytes, offset, &ret);
         }
+        errno = plfs_error_to_errno(err);
         if (err == PLFS_SUCCESS) {
             dstream << "- File read succeed, read " << ret << "bytes" << endl;
             lseek(fd, offset+ret, SEEK_SET);
@@ -303,6 +307,7 @@ ssize_t _write(int fd, const void *buf, size_t nbytes) {
         while (err == PLFS_EAGAIN) {
             err = plfs_write(plfs_file->plfs_fd, (const char*)buf, nbytes, offset, getpid(), &ret);
         }
+        errno = plfs_error_to_errno(err);
         if (err == PLFS_SUCCESS) {
             dstream << "- File write succeed, write " << ret << "bytes" << endl;
             lseek(fd, offset+ret, SEEK_SET);
@@ -321,22 +326,20 @@ ssize_t _write(int fd, const void *buf, size_t nbytes) {
 int _chmod(const char *path, mode_t mode) {
     char* real_path = realpath(path, NULL);
     int ret;
-    if (real_path == NULL) {
-        ret = -1;
-    }
+    if (real_path == NULL) ret = -1;
     else if (is_plfs_path(real_path) == 1) {
         plfs_error_t err = PLFS_EAGAIN;
         while (err == PLFS_EAGAIN) {
             err = plfs_chmod(real_path, mode);
         }
+        errno = plfs_error_to_errno(err);
         ret = (err == PLFS_SUCCESS) ? 0 : -1;
     }
-    else {
-        ret = chmod(path, mode);
-    }
+    else ret = chmod(path, mode);
     free(real_path);
     return ret;
 }
+
 
 int _fchmod(int fd, mode_t mode) {
     int ret;
@@ -349,8 +352,27 @@ int _fchmod(int fd, mode_t mode) {
         while (err == PLFS_EAGAIN) {
             err = plfs_chmod(real_path, mode);
         }
+        errno = plfs_error_to_errno(err);
         ret = (err == PLFS_SUCCESS) ? 0 : -1;
     }
+    return ret;
+}
+
+
+int _access(const char* path, int mask) {
+    char* real_path = realpath(path, NULL);
+    int ret;
+    if (real_path == NULL) ret = -1;
+    else if (is_plfs_path(real_path) == 1) {
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_access(real_path, mask);
+        }
+        errno = plfs_error_to_errno(err);
+        ret = (err == PLFS_SUCCESS) ? 0 : -1;
+    }
+    else ret = chmod(path, mask);
+    free(real_path);
     return ret;
 }
 
