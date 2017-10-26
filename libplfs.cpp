@@ -19,6 +19,12 @@
 #define dstream cout
 #endif
 
+
+
+// TODO LIST:
+// 1. resolve absolute path and relative path
+// 2. Offset issue
+
 std::ostream cnull(0); // A temporary solution for /dev/null like stream
 
 struct Plfs_file {
@@ -141,7 +147,9 @@ int _open(const char *path, int oflags, mode_t mode) {
             ret = fake_fd;
         }
         else {
+            int t_ref = 0;
             dstream << "- Fake file open/create failed, it returns" << fake_fd << endl;
+            plfs_close(plfs_fd, getpid(), getuid(), oflags, NULL, &t_ref);
             ret = -1;
             free(fake_path);
         }
@@ -160,16 +168,19 @@ int _open(const char *path, int oflags) {
 }
 
 
-int _close(int fildes) {
-    dstream << "Trying to close file. fake_fd = " << fildes << endl;
+int _close(int fd) {
+    if (fd == 0 || fd == 1 || fd == 2) {
+        return close(fd);
+    }
+    dstream << "Trying to close file. fake_fd = " << fd << endl;
     int ret;
-    if (global_fd_table.count(fildes) == 0) {
+    if (global_fd_table.count(fd) == 0) {
         dstream << "- Invalid file descriptor, return" << endl;
         ret = -1;
     }
     else {
         dstream << "- File descriptor found in global fd table" << endl;
-        Fd_map* fd_map = global_fd_table[fildes];
+        Fd_map* fd_map = global_fd_table[fd];
         Plfs_fd* plfs_fd = fd_map->plfs_file->plfs_fd;
         int fake_fd = fd_map->fake_fd;
         char* fake_path = fd_map->fake_path;
@@ -192,8 +203,8 @@ int _close(int fildes) {
                 if (ret == 0) {
                     dstream << "- Unlink fake file succeed!" << endl;
                     free(fake_path);
-                    free(global_fd_table[fildes]);
-                    global_fd_table.erase(fildes);
+                    free(global_fd_table[fd]);
+                    global_fd_table.erase(fd);
                     if (plfs_file->ref_num == 0) {
                         dstream << "- Ref = 0, delete the PLFS file" << endl;
                         hashed_plfs_files.erase(plfs_file->hashed_plfs_path);
@@ -214,19 +225,60 @@ int _close(int fildes) {
 }
 
 
+
+
+
+// plfs_error_t plfs_read( Plfs_fd *, char *buf, size_t size, off_t offset, ssize_t *bytes_read );
+
+ssize_t _read(int fd, void *buf, size_t nbytes) {
+    dstream << "Trying to read file. fake_fd = " << fd << endl;
+    ssize_t ret;
+    if (global_fd_table.count(fd) == 0) {
+        dstream << "- Invalid file descriptor, return" << endl;
+        ret = 0;
+    }
+    else {
+        dstream << "- File descriptor found in global fd table" << endl;
+        Fd_map* fd_map = global_fd_table[fd];
+        Plfs_file* plfs_file = fd_map->plfs_file;
+        off_t offset = lseek(fd, 0, SEEK_CUR);
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_read(plfs_file->plfs_fd, (char*)buf, nbytes, offset, &ret);
+        }
+        if (err == PLFS_SUCCESS) {
+            lseek(fd, offset+ret, SEEK_SET);
+            dstream << "- File read succeed, read " << ret << "bytes" << endl;
+        }
+        else {
+            dstream << "- PLFS read failed, it returns " << err;
+        }
+    }
+    return ret;
+}
+
+// plfs_error_t plfs_write( Plfs_fd *, const char *, size_t, off_t, pid_t, ssize_t *bytes_written );
+
+
+ssize_t write(int fd, const void *buf, size_t nbytes) {
+    return 0;
+}
+
+
 int main() {
     int a = _open("/mnt/PLFS/test", O_RDWR);
     int b = _open("/mnt/PLFS/test", O_RDWR);
     int c = _open("/mnt/PLFS/test", O_RDWR);
     int d = _open("/mnt/PLFS/test2", O_RDONLY);
-    print_tables();
-    int e = _close(a);
-    print_tables();
-    e = _close(b);
-    print_tables();
-    e = _close(c);
-    print_tables();
-    e = _close(d);
-    print_tables();
+
+    char buf[128];
+    dstream << _read(a, buf, 4) << endl;
+    dstream << buf << endl;
+    dstream << _read(a, buf, 4) << endl;
+    dstream << buf << endl;
+    dstream << _read(b, buf, 4) << endl;
+    dstream << buf << endl;
+    
+
     return 0;
 }
