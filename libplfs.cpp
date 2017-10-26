@@ -11,7 +11,6 @@
 #define DEBUG // DEBUG INFO SWITCH
 #define endl std::endl
 #define cout std::cout
-#define FAKE_FILE_DIR "/tmp/PLFS_"
 
 #ifndef DEBUG
 #define dstream cnull
@@ -28,7 +27,8 @@
 std::ostream cnull(0); // A temporary solution for /dev/null like stream
 
 struct Plfs_file {
-    unsigned long hashed_plfs_path;
+    unsigned long hashed_real_path;
+    char* real_path;
     Plfs_fd* plfs_fd;
     int ref_num;
 };
@@ -39,6 +39,7 @@ struct Fd_map {
     int oflags;
     Plfs_file* plfs_file;
     // Do not need maintain offset here, use lseek(fake_fd, 0, SEEK_CUR) instead
+    FILE* file; // For c++ use
 };
 
 std::map<int, Fd_map*> global_fd_table;
@@ -80,7 +81,7 @@ char* gen_rand_path() {
     char* _ret = ret + 10;
     for (int c; c=rand()%62, *(_ret++) = (c+"07="[(c+16)/26])*(_ret-ret<23););
     ret[22] = '\0';
-    strncpy(ret, FAKE_FILE_DIR, strlen(FAKE_FILE_DIR));
+    strncpy(ret, "/tmp/PLFS_", 10);
     return ret;
 }
 
@@ -107,21 +108,27 @@ unsigned long string_hash(const char *str) {
 */
 
 int _open(const char *path, int oflags, mode_t mode) {
-    dstream << "Trying to open file " << path << " ";
+    char* real_path = realpath(path, NULL); // It's surprising that the realpath() syscall exists!!
+    if (real_path == NULL) return -1;
+    else if (is_plfs_path(real_path) == 0) {
+        free(real_path);
+        return open(path, oflags, mode);
+    }
+    dstream << "Trying to open file " << real_path << " ";
     Plfs_fd* plfs_fd = NULL;
-    unsigned long hashed_plfs_path = string_hash(path);
-    dstream << hashed_plfs_path << endl;
+    unsigned long hashed_real_path = string_hash(real_path);
+    dstream << hashed_real_path << endl;
     bool first_open = true;
-    if (hashed_plfs_files.count(hashed_plfs_path) != 0) {
-        plfs_fd = hashed_plfs_files[hashed_plfs_path]->plfs_fd; // Not the first time to open the file
-        dstream << "- Not first time opening; current ref_num " << hashed_plfs_files[hashed_plfs_path]->ref_num << endl;
+    if (hashed_plfs_files.count(hashed_real_path) != 0) {
+        plfs_fd = hashed_plfs_files[hashed_real_path]->plfs_fd; // Not the first time to open the file
+        dstream << "- Not first time opening; current ref_num " << hashed_plfs_files[hashed_real_path]->ref_num << endl;
         first_open = false;
     }
 
     plfs_error_t err = PLFS_EAGAIN;
     int ret;
     while (err == PLFS_EAGAIN) {
-        err = plfs_open(&plfs_fd, path, oflags, getpid(), mode, NULL);
+        err = plfs_open(&plfs_fd, real_path, oflags, getpid(), mode, NULL);
     }
     if (err == PLFS_SUCCESS) {
         dstream << "- Open PLFS file succeed! plfs_fd = " << plfs_fd << endl;
@@ -130,18 +137,21 @@ int _open(const char *path, int oflags, mode_t mode) {
         if (fake_fd >= 0) {
             dstream << "- Open Fake file succeed! fake_fd = " << fake_fd << " " << fake_path << endl;
             Fd_map* fd_map = (Fd_map*)malloc(sizeof(struct Fd_map));
+            memset(fd_map, 0, sizeof(struct Fd_map));
             fd_map->fake_fd = fake_fd;
             fd_map->fake_path = fake_path;
             fd_map->oflags = oflags;
             if (first_open) {
                 fd_map->plfs_file = (Plfs_file*)malloc(sizeof(struct Plfs_file));
-                fd_map->plfs_file->hashed_plfs_path = hashed_plfs_path;
+                memset(fd_map->plfs_file, 0, sizeof(struct Plfs_file));
+                fd_map->plfs_file->hashed_real_path = hashed_real_path;
+                fd_map->plfs_file->real_path = real_path;
                 fd_map->plfs_file->plfs_fd = plfs_fd;
                 fd_map->plfs_file->ref_num = 1;
-                hashed_plfs_files[hashed_plfs_path] = fd_map->plfs_file;
+                hashed_plfs_files[hashed_real_path] = fd_map->plfs_file;
             }
             else {
-                fd_map->plfs_file = hashed_plfs_files[hashed_plfs_path];
+                fd_map->plfs_file = hashed_plfs_files[hashed_real_path];
                 fd_map->plfs_file->ref_num += 1;
             }
             global_fd_table[fake_fd] = fd_map;
@@ -181,14 +191,11 @@ int _open(const char *path, int oflags) {
 */
 
 int _close(int fd) {
-    if (fd == 0 || fd == 1 || fd == 2) {
-        return close(fd);
-    }
     dstream << "Trying to close file. fake_fd = " << fd << endl;
     int ret;
     if (global_fd_table.count(fd) == 0) {
-        dstream << "- Invalid file descriptor, return" << endl;
-        ret = -1;
+        dstream << "- File descriptor not found, return standard close()" << endl;
+        return close(fd);
     }
     else {
         dstream << "- File descriptor found in global fd table" << endl;
@@ -219,7 +226,8 @@ int _close(int fd) {
                     global_fd_table.erase(fd);
                     if (plfs_file->ref_num == 0) {
                         dstream << "- Ref = 0, delete the PLFS file" << endl;
-                        hashed_plfs_files.erase(plfs_file->hashed_plfs_path);
+                        hashed_plfs_files.erase(plfs_file->hashed_real_path);
+                        free(plfs_file->real_path);
                         free(plfs_file);
                     }
                 }
@@ -243,12 +251,12 @@ int _close(int fd) {
   *** EXPERIMENTAL ***
 */
 
-ssize_t _read(int fd, const void *buf, size_t nbytes) {
+ssize_t _read(int fd, void *buf, size_t nbytes) {
     dstream << "Trying to read file. fake_fd = " << fd << endl;
     ssize_t ret;
     if (global_fd_table.count(fd) == 0) {
         dstream << "- Invalid file descriptor, return" << endl;
-        ret = 0;
+        ret = read(fd, buf, nbytes);
     }
     else {
         dstream << "- File descriptor found in global fd table" << endl;
@@ -272,7 +280,7 @@ ssize_t _read(int fd, const void *buf, size_t nbytes) {
     return ret;
 }
 
-// plfs_error_t plfs_write( Plfs_fd *, const char *, size_t, off_t, pid_t, ssize_t *bytes_written );
+
 /*
   A prototype of write() syscall
 
@@ -284,7 +292,7 @@ ssize_t _write(int fd, const void *buf, size_t nbytes) {
     ssize_t ret;
     if (global_fd_table.count(fd) == 0) {
         dstream << "- Invalid file descriptor, return" << endl;
-        ret = 0;
+        ret = write(fd, buf, nbytes);
     }
     else {
         dstream << "- File descriptor found in global fd table" << endl;
@@ -310,18 +318,50 @@ ssize_t _write(int fd, const void *buf, size_t nbytes) {
 }
 
 
+int _chmod(const char *path, mode_t mode) {
+    char* real_path = realpath(path, NULL);
+    int ret;
+    if (real_path == NULL) {
+        ret = -1;
+    }
+    else if (is_plfs_path(real_path) == 1) {
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_chmod(real_path, mode);
+        }
+        ret = (err == PLFS_SUCCESS) ? 0 : -1;
+    }
+    else {
+        ret = chmod(path, mode);
+    }
+    free(real_path);
+    return ret;
+}
+
+int _fchmod(int fd, mode_t mode) {
+    int ret;
+    if (global_fd_table.count(fd) == 0) {
+        ret = fchmod(fd, mode);
+    }
+    else {
+        char* real_path = global_fd_table[fd]->plfs_file->real_path;
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_chmod(real_path, mode);
+        }
+        ret = (err == PLFS_SUCCESS) ? 0 : -1;
+    }
+    return ret;
+}
+
+
 int main() {
     int a = _open("/mnt/PLFS/test", O_RDWR);
     int b = _open("/mnt/PLFS/test", O_RDWR);
-    int c = _open("/mnt/PLFS/test", O_RDWR);
+    int c = _open("../../../../../mnt/PLFS/test", O_RDWR);
     int d = _open("/mnt/PLFS/test2", O_RDONLY);
 
-    char buf[128];
-    dstream << _read(a, buf, 4) << endl;
-    dstream << buf << endl;
-    buf[0] = 'f';
-    _write(a, buf, 4);
-    _close(a);
+    print_tables();
     
 
     return 0;
