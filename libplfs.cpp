@@ -438,6 +438,11 @@ int _chown(const char *path, uid_t uid, gid_t gid) {
 // }
 
 
+int _creat(const char* path, mode_t mode) {
+    return _open(path, O_CREAT|O_WRONLY|O_TRUNC, mode);
+}
+
+
 int main() {
     int a = _open("/mnt/PLFS/test", O_RDWR);
     int b = _open("/mnt/PLFS/test", O_RDWR);
