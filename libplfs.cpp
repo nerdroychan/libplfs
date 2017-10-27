@@ -131,7 +131,6 @@ int _open(const char *path, int oflags, mode_t mode) {
     while (err == PLFS_EAGAIN) {
         err = plfs_open(&plfs_fd, real_path, oflags, getpid(), mode, NULL);
     }
-    errno = plfs_error_to_errno(err);
     if (err == PLFS_SUCCESS) {
         dstream << "- Open PLFS file succeed! plfs_fd = " << plfs_fd << endl;
         char* fake_path = gen_rand_path();
@@ -168,6 +167,7 @@ int _open(const char *path, int oflags, mode_t mode) {
         }
     }
     else {
+        errno = plfs_error_to_errno(err);
         dstream << "- PLFS file open failed, err = " << err << endl;
         ret = -1;
     }
@@ -211,8 +211,8 @@ int _close(int fd) {
         while (err == PLFS_EAGAIN) {
             err = plfs_close(plfs_fd, getpid(), getuid(), oflags, NULL, &(plfs_file->ref_num));
         }
-        errno = plfs_error_to_errno(err);
         if (err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
             dstream << "- Close PLFS file failed, err = " << err << endl;
             ret = -1;
         }
@@ -270,13 +270,13 @@ ssize_t _read(int fd, void *buf, size_t nbytes) {
         while (err == PLFS_EAGAIN) {
             err = plfs_read(plfs_file->plfs_fd, (char*)buf, nbytes, offset, &ret);
         }
-        errno = plfs_error_to_errno(err);
         if (err == PLFS_SUCCESS) {
             dstream << "- File read succeed, read " << ret << "bytes" << endl;
             lseek(fd, offset+ret, SEEK_SET);
             dstream << "- New offset is " << lseek(fd, 0, SEEK_CUR) << endl;
         }
         else {
+            errno = plfs_error_to_errno(err);
             dstream << "- PLFS read failed, it returns " << err;
         }
     }
@@ -307,7 +307,6 @@ ssize_t _write(int fd, const void *buf, size_t nbytes) {
         while (err == PLFS_EAGAIN) {
             err = plfs_write(plfs_file->plfs_fd, (const char*)buf, nbytes, offset, getpid(), &ret);
         }
-        errno = plfs_error_to_errno(err);
         if (err == PLFS_SUCCESS) {
             dstream << "- File write succeed, write " << ret << "bytes" << endl;
             lseek(fd, offset+ret, SEEK_SET);
@@ -315,6 +314,7 @@ ssize_t _write(int fd, const void *buf, size_t nbytes) {
             plfs_sync(plfs_file->plfs_fd);
         }
         else {
+            errno = plfs_error_to_errno(err);
             dstream << "- PLFS write failed, it returns " << err;
         }
     }
@@ -332,8 +332,13 @@ int _chmod(const char *path, mode_t mode) {
         while (err == PLFS_EAGAIN) {
             err = plfs_chmod(real_path, mode);
         }
-        errno = plfs_error_to_errno(err);
-        ret = (err == PLFS_SUCCESS) ? 0 : -1;
+        if (err == PLFS_SUCCESS) {
+            ret = 0;
+        }
+        else {
+            errno = plfs_error_to_errno(err);
+            ret = 0;
+        }
     }
     else ret = chmod(path, mode);
     free(real_path);
@@ -341,22 +346,27 @@ int _chmod(const char *path, mode_t mode) {
 }
 
 
-int _fchmod(int fd, mode_t mode) {
-    int ret;
-    if (global_fd_table.count(fd) == 0) {
-        ret = fchmod(fd, mode);
-    }
-    else {
-        char* real_path = global_fd_table[fd]->plfs_file->real_path;
-        plfs_error_t err = PLFS_EAGAIN;
-        while (err == PLFS_EAGAIN) {
-            err = plfs_chmod(real_path, mode);
-        }
-        errno = plfs_error_to_errno(err);
-        ret = (err == PLFS_SUCCESS) ? 0 : -1;
-    }
-    return ret;
-}
+// int _fchmod(int fd, mode_t mode) {
+//     int ret;
+//     if (global_fd_table.count(fd) == 0) {
+//         ret = fchmod(fd, mode);
+//     }
+//     else {
+//         char* real_path = global_fd_table[fd]->plfs_file->real_path;
+//         plfs_error_t err = PLFS_EAGAIN;
+//         while (err == PLFS_EAGAIN) {
+//             err = plfs_chmod(real_path, mode);
+//         }
+//         if (err == PLFS_SUCCESS) {
+//             ret = 0;
+//         }
+//         else {
+//             errno = plfs_error_to_errno(err);
+//             ret = 0;
+//         }
+//     }
+//     return ret;
+// }
 
 
 int _access(const char* path, int mask) {
@@ -368,13 +378,64 @@ int _access(const char* path, int mask) {
         while (err == PLFS_EAGAIN) {
             err = plfs_access(real_path, mask);
         }
-        errno = plfs_error_to_errno(err);
-        ret = (err == PLFS_SUCCESS) ? 0 : -1;
+        if (err == PLFS_SUCCESS) {
+            ret = 0;
+        }
+        else {
+            errno = plfs_error_to_errno(err);
+            ret = 0;
+        }
     }
     else ret = access(path, mask);
     free(real_path);
     return ret;
 }
+
+
+int _chown(const char *path, uid_t uid, gid_t gid) {
+    char* real_path = realpath(path, NULL);
+    int ret;
+    if (real_path == NULL) ret = -1;
+    else if (is_plfs_path(real_path) == 1) {
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_chown(real_path, uid, gid);
+        }
+        if (err == PLFS_SUCCESS) {
+            ret = 0;
+        }
+        else {
+            errno = plfs_error_to_errno(err);
+            ret = 0;
+        }
+    }
+    else ret = chown(path, uid, gid);
+    free(real_path);
+    return ret;
+}
+
+
+// int _fchown(int fd, uid_t uid, gid_t gid) {
+//     int ret;
+//     if (global_fd_table.count(fd) == 0) {
+//         ret = fchown(fd, uid, gid);
+//     }
+//     else {
+//         char* real_path = global_fd_table[fd]->plfs_file->real_path;
+//         plfs_error_t err = PLFS_EAGAIN;
+//         while (err == PLFS_EAGAIN) {
+//             err = plfs_chown(real_path, uid, gid);
+//         }
+//         if (err == PLFS_SUCCESS) {
+//             ret = 0;
+//         }
+//         else {
+//             errno = plfs_error_to_errno(err);
+//             ret = 0;
+//         }
+//     }
+//     return ret;
+// }
 
 
 int main() {
