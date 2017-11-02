@@ -29,9 +29,8 @@ struct Plfs_file {
     unsigned long hashed_real_path;
 };
 
-std::map<int, Plfs_file*> fd_file_table;
-// std::map<FILE*, Plfs_file*> cfile_file_table;
 std::map<unsigned long, Plfs_file*> path_file_table;
+std::map<int, Plfs_file*> fd_file_table;
 std::map<int, FILE*> fd_cfile_table;
 
 void print_tables() {
@@ -39,43 +38,32 @@ void print_tables() {
     for (std::map<int, Plfs_file*>::const_iterator i=fd_file_table.begin(); i!=fd_file_table.end(); i++) {
         int key = i->first;
         Plfs_file* value = i->second;
-        dstream << "fake fd: " << key << endl;
-        dstream << "    plfs_fd: " << value->plfs_fd;
-        dstream << "    oflags : " << value->oflags;
-        dstream << "    ref_num: " << value->ref_num << endl;
+        cout << key << " -> " << value << endl;
+    }
+    dstream << endl << "!! PRINT fd_cfile_table !!" << endl;
+    for (std::map<int, FILE*>::const_iterator i=fd_cfile_table.begin(); i!=fd_cfile_table.end(); i++) {
+        int key = i->first;
+        FILE* value = i->second;
+        cout << key << " -> " << value << endl;
     }
     dstream << endl << "!! PRINT path_file_table !!" << endl;
     for (std::map<unsigned long, Plfs_file*>::const_iterator i=path_file_table.begin(); i!=path_file_table.end(); i++) {
         unsigned long key = i->first;
         Plfs_file* value = i->second;
-        dstream << "hashed path: " << key << endl;
-        dstream << "    plfs_fd: " << value->plfs_fd;
-        dstream << "    oflags : " << value->oflags;
-        dstream << "    ref_num: " << value->ref_num << endl;
-    }
-    // dstream << endl << "!! PRINT fd_cfile_table !!" << endl;
-    // for (std::map<FILE*, Plfs_file*>::const_iterator i=cfile_file_table.begin(); i!=cfile_file_table.end(); i++) {
-    //     FILE* key = i->first;
-    //     Plfs_file* value = i->second;
-    //     dstream << "C file: " << key << endl;
-    //     dstream << "    plfs_file: " << value;
-    // }
-    dstream << endl << "!! PRINT fd_cfile_table !!" << endl;
-    for (std::map<int, FILE*>::const_iterator i=fd_cfile_table.begin(); i!=fd_cfile_table.end(); i++) {
-        int key = i->first;
-        FILE* value = i->second;
-        dstream << "fake fd: " << key << endl;
-        dstream << "    plfs_file: " << value;
+        cout << "hashed path: " << key << endl;
+        cout << "    plfs_fd: " << value->plfs_fd;
+        cout << "    oflags : " << value->oflags;
+        cout << "    ref_num: " << value->ref_num << endl;
     }
     dstream << "END" << endl << endl;
 }
 
 /*
-  Loose realpath VERY IMPORTANT
-  TODO
+  VERY IMPORTANT
+  TODO !!!
 */
 
-char* loose_realpath(const char* path) {
+char* normalize_path(const char* path) {
     char* tmp_path = (char*)malloc(sizeof(char)*strlen(path));
     strncpy(tmp_path, path, strlen(path));
     char* real_path = realpath(tmp_path, NULL);
@@ -87,6 +75,7 @@ char* loose_realpath(const char* path) {
     }
     return real_path;
 }
+
 
 /*
   String HASH function
@@ -102,39 +91,23 @@ unsigned long string_hash(const char *str) {
     return hash;
 }
 
-
-/*
-  A prototype of open() syscall w/ mode
-
-  *** EXPERIMENTAL ***
-*/
-
-int _open(const char *path, int oflags, mode_t mode) {
-    char* real_path = realpath(path, NULL);
-    if (real_path == NULL) {
-        dstream << "Invalid path, return -1" << endl;
-        return -1;
-    }
-    else if (is_plfs_path(real_path) == 0) {
-        dstream << "Not PLFS path, return standard open()";
-        free(real_path);
-        return open(path, oflags, mode);
-    }
-    dstream << "Trying to open file " << real_path << " ";
+// Supposed that the path here is :
+// * absolute path
+// * plfs path
+FILE* normalized_plfs_open(const char* path, int oflags, mode_t mode) {
+    dstream << "= Normalized plfs open: " << path << endl;
     Plfs_fd* plfs_fd = NULL;
-    unsigned long hashed_real_path = string_hash(real_path);
-    dstream << hashed_real_path << endl;
+    unsigned long hashed_real_path = string_hash(path);
     bool first_open = true;
     if (path_file_table.count(hashed_real_path) != 0) {
         plfs_fd = path_file_table[hashed_real_path]->plfs_fd; // Not the first time to open the file
-        dstream << "- Not first time opening; current ref_num " << path_file_table[hashed_real_path]->ref_num << endl;
+        dstream << "- Not first opening; current ref_num " << path_file_table[hashed_real_path]->ref_num << endl;
         first_open = false;
     }
-
     plfs_error_t err = PLFS_EAGAIN;
-    int ret;
+    FILE* ret;
     while (err == PLFS_EAGAIN) {
-        err = plfs_open(&plfs_fd, real_path, oflags, getpid(), mode, NULL);
+        err = plfs_open(&plfs_fd, path, oflags, getpid(), mode, NULL);
     }
     if (err == PLFS_SUCCESS) {
         dstream << "- Open PLFS file succeed! plfs_fd = " << plfs_fd << endl;
@@ -156,24 +129,90 @@ int _open(const char *path, int oflags, mode_t mode) {
                 plfs_file->ref_num += 1;
             }
             fd_file_table[fake_fd] = plfs_file;
-            fd_cfile_table[fake_fd] = file;
-            ret = fake_fd;
+            ret = file;
         }
         else {
             int t_ref = 0;
             dstream << "- Fake file open/create failed" << endl;
             plfs_close(plfs_fd, getpid(), getuid(), oflags, NULL, &t_ref);
-            ret = -1;
+            ret = NULL;
         }
     }
     else {
         errno = plfs_error_to_errno(err);
-        dstream << "- PLFS file open failed, err = " << err << endl;
+        dstream << "- plfs_open failed, err = " << errno << endl;
+        ret = NULL;
+    }
+    return ret;
+}
+
+
+int normalized_plfs_close(FILE* file) {
+    int fd = fileno(file);
+    dstream << "Trying to close file. fake_fd = " << fd << endl;
+    int ret;
+    Plfs_file* plfs_file = fd_file_table[fd];
+    Plfs_fd* plfs_fd = plfs_file->plfs_fd;
+    int oflags = plfs_file->oflags;
+    plfs_error_t err = PLFS_EAGAIN;
+    while (err == PLFS_EAGAIN) {
+        err = plfs_close(plfs_fd, getpid(), getuid(), oflags, NULL, &(plfs_file->ref_num));
+    }
+    if (err != PLFS_SUCCESS) {
+        errno = plfs_error_to_errno(err);
+        dstream << "- Close PLFS file failed, err = " << err << endl;
         ret = -1;
     }
-    dstream << "- open() returns " << ret << endl;
-    free(real_path);
+    else {
+        dstream << "- Close PLFS file succeed!" << endl;
+        ret = fclose(file);
+        if (ret == 0) {
+            dstream << "- Close fake file succeed!" << endl;
+            fd_file_table.erase(fd);
+            if (plfs_file->ref_num == 0) {
+                dstream << "- Ref = 0, delete the PLFS file" << endl;
+                path_file_table.erase(plfs_file->hashed_real_path);
+                free(plfs_file);
+            }
+        }
+        else {
+            dstream << "- Close fake file failed, it returns " << ret << endl;
+            cout << "FATAL inconsistency occurs, exit!!" << endl;
+            exit(-1);
+        }
+    }
+    dstream << "close() returns " << ret << endl;
     return ret;
+}
+
+
+/*
+  A prototype of open() syscall w/ mode
+
+  *** EXPERIMENTAL ***
+*/
+
+int _open(const char *path, int oflags, mode_t mode) {
+    dstream << "Call open on path " << path << " with oflags " << oflags << " and mode " << mode << endl;
+    char* real_path = realpath(path, NULL);
+    if (real_path == NULL) {
+        dstream << "Invalid path, return -1" << endl;
+        return -1;
+    }
+    if (is_plfs_path(real_path) == 0) {
+        dstream << "Not PLFS path, return standard open()";
+        free(real_path);
+        return open(path, oflags, mode);
+    }
+    FILE* file = normalized_plfs_open(real_path, oflags, mode);
+    if (file == NULL) {
+        dstream << " - Normalized open failed" << endl;
+        return -1;
+    }
+    int fake_fd = fileno(file);
+    fd_cfile_table[fake_fd] = file;
+    free(real_path);
+    return fake_fd;
 }
 
 /*
@@ -195,46 +234,17 @@ int _open(const char *path, int oflags) {
 
 int _close(int fd) {
     dstream << "Trying to close file. fake_fd = " << fd << endl;
-    int ret;
-    if (fd_file_table.count(fd) == 0) {
+    if (fd_cfile_table.count(fd) == 0) {
         dstream << "- File descriptor not found, return standard close()" << endl;
         return close(fd);
     }
-    else {
-        dstream << "- File descriptor found in fd_file_table" << endl;
-        Plfs_file* plfs_file = fd_file_table[fd];
-        Plfs_fd* plfs_fd = plfs_file->plfs_fd;
-        int oflags = plfs_file->oflags;
-        plfs_error_t err = PLFS_EAGAIN;
-        while (err == PLFS_EAGAIN) {
-            err = plfs_close(plfs_fd, getpid(), getuid(), oflags, NULL, &(plfs_file->ref_num));
-        }
-        if (err != PLFS_SUCCESS) {
-            errno = plfs_error_to_errno(err);
-            dstream << "- Close PLFS file failed, err = " << err << endl;
-            ret = -1;
-        }
-        else {
-            dstream << "- Close PLFS file succeed!" << endl;
-            ret = close(fd);
-            if (ret == 0) {
-                dstream << "- Close fake file succeed!" << endl;
-                fd_file_table.erase(fd);
-                fclose(fd_cfile_table[fd]);
-                fd_cfile_table.erase(fd);
-                if (plfs_file->ref_num == 0) {
-                    dstream << "- Ref = 0, delete the PLFS file" << endl;
-                    path_file_table.erase(plfs_file->hashed_real_path);
-                    free(plfs_file);
-                }
-            }
-            else {
-                dstream << "- Close fake file failed, it returns " << ret << endl;
-                cout << "FATAL inconsistency occurs, exit!!" << endl;
-                exit(-1);
-            }
-        }
+    FILE* file = fd_cfile_table[fd];
+    int ret = normalized_plfs_close(file);
+    if (ret != 0) {
+        dstream << " - Normalized close failed" << endl;
+        return -1;
     }
+    fd_cfile_table.erase(fd);
     dstream << "close() returns " << ret << endl;
     return ret;
 }
@@ -427,32 +437,89 @@ int _chown(const char *path, uid_t uid, gid_t gid) {
 //     return ret;
 // }
 
+int str_to_oflags(const char* mode) {
+    int ret;
+    int len = strlen(mode);
+    char* tmp = (char*)malloc(len*sizeof(char)+1);
+    int index = 0;
+    for(int i=0; i<strlen(mode); i++) {
+        if (mode[i] != 'b') tmp[index++] = mode[i];
+    }
+    tmp[index] = '\0';
+    if (strcmp(tmp, "r") == 0) ret = O_RDONLY;
+    else if (strcmp(tmp, "r+") == 0) ret = O_RDWR;
+    else if (strcmp(tmp, "w") == 0) ret = O_WRONLY | O_TRUNC | O_CREAT;
+    else if (strcmp(tmp, "w+") == 0) ret = O_RDWR | O_TRUNC | O_CREAT;
+    else if (strcmp(tmp, "a") == 0) ret = O_WRONLY | O_CREAT | O_APPEND;
+    else if (strcmp(tmp, "a+") == 0) ret = O_RDWR | O_CREAT | O_APPEND;
+    else ret = 0;
+    free(tmp);
+    return ret;
+}
+
 
 int _creat(const char* path, mode_t mode) {
     return _open(path, O_CREAT|O_WRONLY|O_TRUNC, mode);
 }
 
 
+FILE* _fopen(const char *path, const char* mode) {
+    dstream << "Call open on path " << path << " with mode " << mode << endl;
+    char* real_path = realpath(path, NULL);
+    if (real_path == NULL) {
+        dstream << "Invalid path, return -1" << endl;
+        return NULL;
+    }
+    if (is_plfs_path(real_path) == 0) {
+        dstream << "Not PLFS path, return standard fopen()";
+        free(real_path);
+        return fopen(path, mode);
+    }
+    int oflags = str_to_oflags(mode);
+    dstream << "- openflags " << oflags << endl;
+    FILE* file = normalized_plfs_open(real_path, oflags, 0644);
+    if (file == NULL) {
+        dstream << " - Normalized open failed" << endl;
+        return NULL;
+    }
+    free(real_path);
+    return file;
+}
+
+
 int main() {
-    // int a = _open("/mnt/PLFS/test", O_RDWR);
-    // dstream << a << endl;
-    // print_tables();
-    // int b = _open("/mnt/PLFS/test", O_RDWR);
-    // print_tables();
-    // int c = _open("../../../../../mnt/PLFS/test", O_RDWR);
-    // print_tables();
-    // int d = _open("/mnt/PLFS/test2", O_RDONLY);
-    // print_tables();
-
-    // char buf[5] = {'a', 'b', 'c', 'd', '\n'};
-    // for (int i=0; i<1; i++) {
-    //     _write(a, buf, 5);
-    // }
-    // _close(a);
-
-    dstream << is_plfs_path("/mnt/../mnt/PLFS/test") << endl;
-
+    int a = _open("/mnt/PLFS/test", O_RDWR);
+    dstream << a << endl;
     print_tables();
+    int b = _open("/mnt/PLFS/test", O_RDWR);
+    print_tables();
+    int c = _open("../../../../../mnt/PLFS/test", O_RDWR);
+    print_tables();
+    int d = _open("/mnt/PLFS/test2", O_RDONLY);
+    print_tables();
+
+    _close(a);
+    print_tables();
+    _close(b);
+    print_tables();
+    _close(c);
+    print_tables();
+    _close(d);
+
+    // // char buf[5] = {'0', '1', 'c', 'x', '\n'};
+    // // for (int i=0; i<1024; i++) {
+    // //     _write(a, buf, 4);
+    // // }
+
+    // // dstream << is_plfs_path("/mnt/../mnt/PLFS/test") << endl;
+
+    // print_tables();
+    // cout << str_to_oflags("rb") << O_RDONLY << endl;
+    // cout << str_to_oflags("r+b") << O_RDWR << endl;
+    // cout << str_to_oflags("wb") << (O_WRONLY | O_TRUNC | O_CREAT) << endl;
+    // cout << str_to_oflags("w+b") << (O_RDWR | O_TRUNC | O_CREAT) << endl;
+    // cout << str_to_oflags("ab") << (O_WRONLY | O_CREAT | O_APPEND) << endl;
+    // cout << str_to_oflags("a+b") << (O_RDWR | O_CREAT | O_APPEND) << endl;
 
     return 0;
 }
