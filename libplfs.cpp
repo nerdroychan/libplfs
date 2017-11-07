@@ -504,22 +504,22 @@ int _fclose(FILE* file) {
 }
 
 
-size_t _fread(void* ptr, size_t size, size_t n, FILE* stream) {
+size_t _fread(void* ptr, size_t size, size_t nmemb, FILE* stream) {
     ssize_t ret;
     int fd = fileno(stream);
     dstream << "Trying to read file. fake_fd = " << fd << endl;
     if (fd_file_table.count(fd) == 0) {
         dstream << "Not in table, return normal fread()" << endl;
-        ret = fread(ptr, size, n, stream);
+        ret = fread(ptr, size, nmemb, stream);
     }
     else {
         dstream << "File descriptor found in global fd table" << endl;
         Plfs_file* plfs_file = fd_file_table[fd];
         long offset = ftell(stream);
-        dstream << "Current offset = " << offset;
+        dstream << "Current offset = " << offset << endl;
         plfs_error_t err = PLFS_EAGAIN;
         while (err == PLFS_EAGAIN) {
-            err = plfs_read(plfs_file->plfs_fd, (char*)ptr, n*size, offset, &ret);
+            err = plfs_read(plfs_file->plfs_fd, (char*)ptr, nmemb*size, offset, &ret);
         }
         if (err == PLFS_SUCCESS) {
             dstream << "File read succeed, read " << ret << " units" << endl;
@@ -532,6 +532,38 @@ size_t _fread(void* ptr, size_t size, size_t n, FILE* stream) {
         }
     }
     dstream << "fread() returns " << ret << endl;
+    return ret;
+}
+
+
+size_t _fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
+    ssize_t ret;
+    int fd = fileno(stream);
+    dstream << "Trying to write file. fake_fd = " << fd << endl;
+    if (fd_file_table.count(fd) == 0) {
+        dstream << "Not in table, return normal fwrite()" << endl;
+        ret = fwrite(ptr, size, nmemb, stream);
+    }
+    else {
+        dstream << "File descriptor found in global fd table" << endl;
+        Plfs_file* plfs_file = fd_file_table[fd];
+        long offset = ftell(stream);
+        dstream << "Current offset = " << offset << endl;
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_write(plfs_file->plfs_fd, (const char*)ptr, nmemb*size, offset, getpid(), &ret);
+        }
+        if (err == PLFS_SUCCESS) {
+            dstream << "File read succeed, write " << ret << " units" << endl;
+            fseek(stream, ret, SEEK_CUR);
+            dstream << "New offset is " << ftell(stream) << endl;
+        }
+        else {
+            errno = plfs_error_to_errno(err);
+            dstream << "- PLFS write failed, it returns " << err;
+        }
+    }
+    dstream << "fwrite() returns " << ret << endl;
     return ret;
 }
 
@@ -570,7 +602,7 @@ int main() {
     // cout << str_to_oflags("ab") << (O_WRONLY | O_CREAT | O_APPEND) << endl;
     // cout << str_to_oflags("a+b") << (O_RDWR | O_CREAT | O_APPEND) << endl;
     
-    FILE* a = _fopen("/mnt/PLFS/test", "w+");
+    FILE* a = _fopen("/mnt/plfs/1", "r+");
     print_tables();
     // FILE* b = _fopen("/mnt/PLFS/test", "w+");
     // print_tables();
@@ -580,12 +612,14 @@ int main() {
     // print_tables();
 
     char buf[1024];
-    // memset(buf, 0, 1024*sizeof(char));
-    _fread(buf, 1, 1, a);
-    // cout << buf << endl;
+    char* wbuf = "writetest";
+    memset(buf, 0, 1024*sizeof(char));
+    
+    _fwrite(wbuf, sizeof(char), strlen(wbuf), a);
 
-    // _fclose(a);
-    // print_tables();
+
+    _fclose(a);
+    print_tables();
     // _fclose(b);
     // print_tables();
     // _fclose(c);
