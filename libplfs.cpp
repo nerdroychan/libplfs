@@ -463,6 +463,39 @@ int _creat(const char* path, mode_t mode) {
 }
 
 
+int _dup(int oldfd) {
+    int ret = dup(oldfd);
+    if (ret >= 0 && fd_file_table.count(oldfd) != 0) {
+        fd_file_table[ret] = fd_file_table[oldfd];
+    }
+    return ret;
+}
+
+
+int _dup2(int oldfd, int newfd) {
+    if (fd_file_table.count(newfd) != 0) {
+        _close(newfd);
+    }
+    int ret = dup2(oldfd, newfd);
+    if (ret >=0 && fd_file_table.count(oldfd) != 0) {
+        fd_file_table[newfd] = fd_file_table[oldfd];
+    }
+    return ret;
+}
+
+
+int _dup3(int oldfd, int newfd, int flags) {
+    if (fd_file_table.count(newfd) != 0) {
+        _close(newfd);
+    }
+    int ret = dup3(oldfd, newfd, flags);
+    if (ret >=0 && fd_file_table.count(oldfd) != 0) {
+        fd_file_table[newfd] = fd_file_table[oldfd];
+    }
+    return ret;
+}
+
+
 FILE* _fopen(const char *path, const char* mode) {
     dstream << "Call open on path " << path << " with mode " << mode << endl;
     char* real_path = normalize_path(path);
