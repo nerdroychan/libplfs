@@ -496,6 +496,84 @@ int _dup3(int oldfd, int newfd, int flags) {
 }
 
 
+int _utime(const char *filename, const struct utimbuf *times) {
+    char* real_path = normalize_path(filename);
+    int ret;
+    if (is_plfs_path(real_path) == 0) {
+        ret = utime(filename, times);
+    }
+    else {
+        plfs_error_t err = plfs_utime(real_path, (struct utimbuf*)times);
+        if (err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+            ret = -1;
+        }
+        else {
+            ret = 0;
+        }
+    }
+    free(real_path);
+    return ret;
+}
+
+
+// int _utimes(const char *filename, const struct timeval times[2]);
+
+// int _fcntl(int fd, int cmd, ... );
+
+// int _openat(int dirfd, const char *pathname, int flags);
+// int _openat(int dirfd, const char *pathname, int flags, mode_t mode);
+
+ssize_t _pread(int fd, void *buf, size_t count, off_t offset) {
+    ssize_t ret;
+    if (fd_cfile_table.count(fd) == 0) {
+        ret = pread(fd, buf, count, offset);
+    }
+    else {
+        Plfs_file* plfs_file = fd_file_table[fd];
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_read(plfs_file->plfs_fd, (char*)buf, count, offset, &ret);
+        }
+        if (err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+        }
+    }
+    dstream << "pread() returns " << ret << endl;
+    return ret;
+}
+
+ssize_t _pwrite(int fd, const void *buf, size_t count, off_t offset) {
+    ssize_t ret;
+    if (fd_cfile_table.count(fd) == 0) {
+        ret = pwrite(fd, buf, count, offset);
+    }
+    else {
+        Plfs_file* plfs_file = fd_file_table[fd];
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_write(plfs_file->plfs_fd, (const char*)buf, count, offset, getpid(), &ret);
+        }
+        if (err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+        }
+    }
+    dstream << "pwrite() returns " << ret << endl;
+    return ret;
+}
+
+
+int _truncate(const char *path, off_t length) {
+    
+}
+// int _ftruncate(int fd, off_t length);
+
+
+
+
+
+
+
 FILE* _fopen(const char *path, const char* mode) {
     dstream << "Call open on path " << path << " with mode " << mode << endl;
     char* real_path = normalize_path(path);
