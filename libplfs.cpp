@@ -226,6 +226,8 @@ int _open(const char *path, int oflags) {
     return _open(path, oflags, 0644);
 }
 
+// int open64;
+
 
 /*
   A prototype of close() syscall
@@ -527,7 +529,7 @@ int _utime(const char *filename, const struct utimbuf *times) {
 
 ssize_t _pread(int fd, void *buf, size_t count, off_t offset) {
     ssize_t ret;
-    if (fd_cfile_table.count(fd) == 0) {
+    if (fd_file_table.count(fd) == 0) {
         ret = pread(fd, buf, count, offset);
     }
     else {
@@ -546,7 +548,7 @@ ssize_t _pread(int fd, void *buf, size_t count, off_t offset) {
 
 ssize_t _pwrite(int fd, const void *buf, size_t count, off_t offset) {
     ssize_t ret;
-    if (fd_cfile_table.count(fd) == 0) {
+    if (fd_file_table.count(fd) == 0) {
         ret = pwrite(fd, buf, count, offset);
     }
     else {
@@ -565,9 +567,65 @@ ssize_t _pwrite(int fd, const void *buf, size_t count, off_t offset) {
 
 
 int _truncate(const char *path, off_t length) {
-
+    char* real_path = normalize_path(path);
+    int ret;
+    if (is_plfs_path(real_path) == 0) {
+        ret = truncate(path, length);
+    }
+    else {
+        plfs_error_t err = plfs_trunc(NULL, path, length, 0);
+        if (err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+            ret = -1;
+        }
+        else {
+            ret = 0;
+        }
+    }
+    free(real_path);
+    return ret;
 }
+
+
+// int _truncate64(const char* path, off_t length);
 // int _ftruncate(int fd, off_t length);
+// int _ftruncate64(int fd, off_t length);
+
+
+void _sync(void) {
+    for (std::map<int, Plfs_file*>::iterator i=fd_file_table.begin(); i!=fd_file_table.end(); i++) {
+        Plfs_file* f = i->second;
+        plfs_sync(f->plfs_fd);
+    }
+    sync();
+}
+
+
+int _syncfs(int fd) {
+    int ret;
+    if (fd_file_table.count(fd) == 0) {
+        ret = syncfs(fd);
+    }
+    else {
+        plfs_error_t err = plfs_sync(fd_file_table[fd]->plfs_fd);
+        if (err != PLFS_SUCCESS) {
+            ret = -1;
+            errno = plfs_error_to_errno(err);
+        }
+        else ret = 0;
+    }
+    return ret;
+}
+
+
+int _fsync(int fd) {
+    return _syncfs(fd);
+}
+
+
+int _fdatasync(int fd) {
+    return _syncfs(fd);
+}
 
 
 
@@ -727,7 +785,7 @@ int main(int argc, char** argv) {
 
     gettimeofday(&start, NULL);
     for (int i=0; i<times; i++) {
-        a = _fopen("/mnt/plfs/1", "r+");
+        a = _fopen("/mnt/plfs/nofuse", "a+");
         _fwrite(input[i], sizeof(char), strlen(input[i]), a);
         _fclose(a);
     }
@@ -737,7 +795,7 @@ int main(int argc, char** argv) {
 
     gettimeofday(&start, NULL);
     for (int i=0; i<times; i++) {
-        a = fopen("/mnt/plfs/1", "r+");
+        a = fopen("/mnt/plfs/withfuse", "a+");
         fwrite(input[i], sizeof(char), strlen(input[i]), a);
         fclose(a);
     }
