@@ -8,8 +8,9 @@
 #include <string>
 #include <iostream>
 #include <vector>
+#include <sys/time.h>
 
-#define DEBUG // DEBUG INFO SWITCH
+// #define DEBUG // DEBUG INFO SWITCH
 #define endl std::endl
 #define cout std::cout
 
@@ -564,7 +565,7 @@ ssize_t _pwrite(int fd, const void *buf, size_t count, off_t offset) {
 
 
 int _truncate(const char *path, off_t length) {
-    
+
 }
 // int _ftruncate(int fd, off_t length);
 
@@ -679,64 +680,71 @@ size_t _fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
 }
 
 
-int main() {
-    // int a = _open("/mnt/PLFS/test", O_RDWR);
-    // dstream << a << endl;
-    // print_tables();
-    // int b = _open("/mnt/PLFS/test", O_RDWR);
-    // print_tables();
-    // int c = _open("../../../../../mnt/PLFS/test", O_RDWR);
-    // print_tables();
-    // int d = _open("/mnt/PLFS/test2", O_RDONLY);
-    // print_tables();
+// TEMPORARY, FROM SO
+unsigned int rand_interval(unsigned int min, unsigned int max)
+{
+    int r;
+    const unsigned int range = 1 + max - min;
+    const unsigned int buckets = RAND_MAX / range;
+    const unsigned int limit = buckets * range;
 
-    // _close(a);
-    // print_tables();
-    // _close(b);
-    // print_tables();
-    // _close(c);
-    // print_tables();
-    // _close(d);
+    /* Create equal size buckets all in a row, then fire randomly towards
+     * the buckets until you land in one of them. All buckets are equally
+     * likely. If you land off the end of the line of buckets, try again. */
+    do
+    {
+        r = rand();
+    } while (r >= limit);
 
-    // // char buf[5] = {'0', '1', 'c', 'x', '\n'};
-    // // for (int i=0; i<1024; i++) {
-    // //     _write(a, buf, 4);
-    // // }
+    return min + (r / buckets);
+}
 
-    // // dstream << is_plfs_path("/mnt/../mnt/PLFS/test") << endl;
+void gen_input(char*** input, int times) {
+    // cout << fuse << times << endl;
+    *input = (char**)malloc(sizeof(char*)*times);
+    for (int i=0; i<times; i++) {
+        int len = rand_interval(2, 200);
+        (*input)[i] = (char*)malloc(sizeof(char)*len);
+        for (int j=0; j<len; j++) {
+            (*input)[i][j] = (char)rand_interval(33,126);
+        }
+        (*input)[i][len-1] = '\0';
+    }
+}
 
-    // print_tables();
-    // cout << str_to_oflags("rb") << O_RDONLY << endl;
-    // cout << str_to_oflags("r+b") << O_RDWR << endl;
-    // cout << str_to_oflags("wb") << (O_WRONLY | O_TRUNC | O_CREAT) << endl;
-    // cout << str_to_oflags("w+b") << (O_RDWR | O_TRUNC | O_CREAT) << endl;
-    // cout << str_to_oflags("ab") << (O_WRONLY | O_CREAT | O_APPEND) << endl;
-    // cout << str_to_oflags("a+b") << (O_RDWR | O_CREAT | O_APPEND) << endl;
+
+int main(int argc, char** argv) {
+    int times = 100;
+    char** input = NULL;
+    gen_input(&input, times);
+
+
+    struct timeval start, stop;
+    double secs;
+
+
+    FILE* a;
+
+    gettimeofday(&start, NULL);
+    for (int i=0; i<times; i++) {
+        a = _fopen("/mnt/plfs/1", "r+");
+        _fwrite(input[i], sizeof(char), strlen(input[i]), a);
+        _fclose(a);
+    }
+    gettimeofday(&stop, NULL);
+    secs = (double)(stop.tv_usec - start.tv_usec) / 1000000 + (double)(stop.tv_sec - start.tv_sec);
+    printf("Time w/o FUSE: %fs\n",secs);
+
+    gettimeofday(&start, NULL);
+    for (int i=0; i<times; i++) {
+        a = fopen("/mnt/plfs/1", "r+");
+        fwrite(input[i], sizeof(char), strlen(input[i]), a);
+        fclose(a);
+    }
+    gettimeofday(&stop, NULL);
+    secs = (double)(stop.tv_usec - start.tv_usec) / 1000000 + (double)(stop.tv_sec - start.tv_sec);
+    printf("Time w/  FUSE: %fs\n",secs);
     
-    FILE* a = _fopen("/mnt/plfs/1", "r+");
-    print_tables();
-    // FILE* b = _fopen("/mnt/PLFS/test", "w+");
-    // print_tables();
-    // FILE* c = _fopen("../../../../../mnt/PLFS/test", "w+");
-    // print_tables();
-    // FILE* d = _fopen("/mnt/PLFS/test2", "w+");
-    // print_tables();
-
-    char buf[1024];
-    char* wbuf = "writetest";
-    memset(buf, 0, 1024*sizeof(char));
-    
-    _fwrite(wbuf, sizeof(char), strlen(wbuf), a);
-
-
-    _fclose(a);
-    print_tables();
-    // _fclose(b);
-    // print_tables();
-    // _fclose(c);
-    // print_tables();
-    // _fclose(d);
-    // print_tables();
 
     return 0;
 }
