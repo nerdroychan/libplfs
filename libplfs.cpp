@@ -28,6 +28,7 @@ struct Plfs_file {
     int oflags;
     int ref_num;
     unsigned long hashed_real_path;
+    char* real_path;
 };
 
 std::map<unsigned long, Plfs_file*> path_file_table;
@@ -124,6 +125,7 @@ FILE* normalized_plfs_open(const char* path, int oflags, mode_t mode) {
                 plfs_file->oflags = oflags;
                 plfs_file->plfs_fd = plfs_fd;
                 plfs_file->hashed_real_path = hashed_real_path;
+                plfs_file->real_path = (char*)path;
                 path_file_table[hashed_real_path] = plfs_file;
             }
             else {
@@ -174,6 +176,7 @@ int normalized_plfs_close(FILE* file) {
             if (plfs_file->ref_num == 0) {
                 dstream << "Ref = 0, delete the PLFS file" << endl;
                 path_file_table.erase(plfs_file->hashed_real_path);
+                free(plfs_file->real_path);
                 free(plfs_file);
             }
         }
@@ -211,7 +214,6 @@ int _open(const char *path, int oflags, mode_t mode) {
     }
     int fake_fd = fileno(file);
     fd_cfile_table[fake_fd] = file;
-    free(real_path);
     dstream << "open() returns " << fake_fd << endl;
     return fake_fd;
 }
@@ -349,27 +351,27 @@ int _chmod(const char *path, mode_t mode) {
 }
 
 
-// int _fchmod(int fd, mode_t mode) {
-//     int ret;
-//     if (fd_file_table.count(fd) == 0) {
-//         ret = fchmod(fd, mode);
-//     }
-//     else {
-//         char* real_path = fd_file_table[fd]->plfs_file->real_path;
-//         plfs_error_t err = PLFS_EAGAIN;
-//         while (err == PLFS_EAGAIN) {
-//             err = plfs_chmod(real_path, mode);
-//         }
-//         if (err == PLFS_SUCCESS) {
-//             ret = 0;
-//         }
-//         else {
-//             errno = plfs_error_to_errno(err);
-//             ret = 0;
-//         }
-//     }
-//     return ret;
-// }
+int _fchmod(int fd, mode_t mode) {
+    int ret;
+    if (fd_file_table.count(fd) == 0) {
+        ret = fchmod(fd, mode);
+    }
+    else {
+        char* real_path = fd_file_table[fd]->real_path;
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_chmod(real_path, mode);
+        }
+        if (err == PLFS_SUCCESS) {
+            ret = 0;
+        }
+        else {
+            errno = plfs_error_to_errno(err);
+            ret = 0;
+        }
+    }
+    return ret;
+}
 
 
 int _access(const char* path, int mask) {
@@ -418,27 +420,27 @@ int _chown(const char *path, uid_t uid, gid_t gid) {
 }
 
 
-// int _fchown(int fd, uid_t uid, gid_t gid) {
-//     int ret;
-//     if (fd_file_table.count(fd) == 0) {
-//         ret = fchown(fd, uid, gid);
-//     }
-//     else {
-//         char* real_path = fd_file_table[fd]->plfs_file->real_path;
-//         plfs_error_t err = PLFS_EAGAIN;
-//         while (err == PLFS_EAGAIN) {
-//             err = plfs_chown(real_path, uid, gid);
-//         }
-//         if (err == PLFS_SUCCESS) {
-//             ret = 0;
-//         }
-//         else {
-//             errno = plfs_error_to_errno(err);
-//             ret = 0;
-//         }
-//     }
-//     return ret;
-// }
+int _fchown(int fd, uid_t uid, gid_t gid) {
+    int ret;
+    if (fd_file_table.count(fd) == 0) {
+        ret = fchown(fd, uid, gid);
+    }
+    else {
+        char* real_path = fd_file_table[fd]->real_path;
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_chown(real_path, uid, gid);
+        }
+        if (err == PLFS_SUCCESS) {
+            ret = 0;
+        }
+        else {
+            errno = plfs_error_to_errno(err);
+            ret = 0;
+        }
+    }
+    return ret;
+}
 
 int str_to_oflags(const char* mode) {
     int ret;
@@ -520,7 +522,31 @@ int _utime(const char *filename, const struct utimbuf *times) {
 }
 
 
-// int _utimes(const char *filename, const struct timeval times[2]);
+int _utimes(const char *filename, const struct timeval times[2]) {
+    char* real_path = normalize_path(filename);
+    int ret;
+    if (is_plfs_path(real_path) == 0) {
+        ret = utimes(filename, times);
+    }
+    else {
+        utimbuf* _times = NULL;
+        if (times != NULL) {
+            _times = (utimbuf*)malloc(sizeof(utimbuf));
+            _times->actime = times[0].tv_sec;
+            _times->modtime = times[1].tv_sec;
+        }
+        plfs_error_t err = plfs_utime(real_path, _times);
+        if (err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+            ret = -1;
+        }
+        else {
+            ret = 0;
+        }
+    }
+    free(real_path);
+    return ret;
+}
 
 // int _fcntl(int fd, int cmd, ... );
 
@@ -652,7 +678,6 @@ FILE* _fopen(const char *path, const char* mode) {
         dstream << " - Normalized open failed" << endl;
         return NULL;
     }
-    free(real_path);
     return file;
 }
 
@@ -785,7 +810,7 @@ int main(int argc, char** argv) {
 
     gettimeofday(&start, NULL);
     for (int i=0; i<times; i++) {
-        a = _fopen("/mnt/plfs/nofuse", "a+");
+        a = _fopen("/mnt/plfs/nofuse", "w+");
         _fwrite(input[i], sizeof(char), strlen(input[i]), a);
         _fclose(a);
     }
@@ -795,7 +820,7 @@ int main(int argc, char** argv) {
 
     gettimeofday(&start, NULL);
     for (int i=0; i<times; i++) {
-        a = fopen("/mnt/plfs/withfuse", "a+");
+        a = fopen("/mnt/plfs/withfuse", "w+");
         fwrite(input[i], sizeof(char), strlen(input[i]), a);
         fclose(a);
     }
