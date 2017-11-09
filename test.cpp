@@ -65,7 +65,11 @@ int main(int argc, char** argv) {
     // secs = (double)(stop.tv_usec - start.tv_usec) / 1000000 + (double)(stop.tv_sec - start.tv_sec);
     // printf("Time %fs\n",secs);
 
-    FILE* a = fopen("/mnt/plfs/withfuse", "r+");
+    FILE* a = fopen("/mnt/plfs/1", "r");
+    char buf[1024];
+    memset(buf, 0, sizeof(char)*1024);
+    fread(buf, sizeof(char), 4, a);
+    std::cout << buf << std::endl;
     
 
     return 0;

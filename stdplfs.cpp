@@ -11,7 +11,7 @@
 #include <vector>
 #include <sys/time.h>
 
-// #define DEBUG // DEBUG INFO SWITCH
+#define DEBUG // DEBUG INFO SWITCH
 #define endl std::endl
 #define cout std::cout
 
@@ -28,7 +28,7 @@ static int (*real_fclose)(FILE*) = NULL;
 static size_t (*real_fread)(void*, size_t, size_t, FILE*) = NULL;
 static size_t (*real_fwrite)(void*, size_t, size_t, FILE*) = NULL;
 static FILE* (*real_tmpfile)() = NULL;
-static char* (*real_realpath)(const char*, char*) = NULL;
+static int (*real_open)(const char*, int, mode_t) = NULL;
 
 
 struct Plfs_file {
@@ -74,7 +74,6 @@ void print_tables() {
 */
 
 char* normalize_path(const char* path) {
-    real_realpath = (char* (*)(const char*, char*)) dlsym(RTLD_NEXT, "realpath");
     // char* tmp_path = (char*)malloc(sizeof(char)*strlen(path));
     // strncpy(tmp_path, path, strlen(path));
     // char* real_path = realpath(tmp_path, NULL);
@@ -85,7 +84,8 @@ char* normalize_path(const char* path) {
     //     real_path = realpath(tmp_path, NULL);
     // }
     // return real_path;
-    return real_realpath(path, NULL);
+    dstream << path << endl;
+    return realpath(path, NULL);
 }
 
 
@@ -158,72 +158,74 @@ FILE* normalized_plfs_open(const char* path, int oflags, mode_t mode) {
 }
 
 
-// int normalized_plfs_close(FILE* file) {
-//     int fd = fileno(file);
-//     dstream << "Enter normalized_plfs_close()" << endl;
-//     int ret;
-//     Plfs_file* plfs_file = fd_file_table[fd];
-//     Plfs_fd* plfs_fd = plfs_file->plfs_fd;
-//     int oflags = plfs_file->oflags;
-//     plfs_error_t err = PLFS_EAGAIN;
-//     while (err == PLFS_EAGAIN) {
-//         err = plfs_close(plfs_fd, getpid(), getuid(), oflags, NULL, &(plfs_file->ref_num));
-//     }
-//     if (err != PLFS_SUCCESS) {
-//         errno = plfs_error_to_errno(err);
-//         dstream << "plfs_close() failed" << endl;
-//         ret = -1;
-//     }
-//     else {
-//         dstream << "plfs_close() succeed!" << endl;
-//         ret = fclose(file);
-//         if (ret == 0) {
-//             dstream << "fclose() succeed!" << endl;
-//             fd_file_table.erase(fd);
-//             if (plfs_file->ref_num == 0) {
-//                 dstream << "Ref = 0, delete the PLFS file" << endl;
-//                 path_file_table.erase(plfs_file->hashed_real_path);
-//                 free(plfs_file->real_path);
-//                 free(plfs_file);
-//             }
-//         }
-//         else {
-//             dstream << "fclose() failed (FATAL ERROR)" << endl;
-//             exit(-1);
-//         }
-//     }
-//     return ret;
-// }
+int normalized_plfs_close(FILE* file) {
+    int fd = fileno(file);
+    dstream << "Enter normalized_plfs_close()" << endl;
+    int ret;
+    Plfs_file* plfs_file = fd_file_table[fd];
+    Plfs_fd* plfs_fd = plfs_file->plfs_fd;
+    int oflags = plfs_file->oflags;
+    plfs_error_t err = PLFS_EAGAIN;
+    while (err == PLFS_EAGAIN) {
+        err = plfs_close(plfs_fd, getpid(), getuid(), oflags, NULL, &(plfs_file->ref_num));
+    }
+    if (err != PLFS_SUCCESS) {
+        errno = plfs_error_to_errno(err);
+        dstream << "plfs_close() failed" << endl;
+        ret = -1;
+    }
+    else {
+        dstream << "plfs_close() succeed!" << endl;
+        ret = fclose(file);
+        if (ret == 0) {
+            dstream << "fclose() succeed!" << endl;
+            fd_file_table.erase(fd);
+            if (plfs_file->ref_num == 0) {
+                dstream << "Ref = 0, delete the PLFS file" << endl;
+                path_file_table.erase(plfs_file->hashed_real_path);
+                free(plfs_file->real_path);
+                free(plfs_file);
+            }
+        }
+        else {
+            dstream << "fclose() failed (FATAL ERROR)" << endl;
+            exit(-1);
+        }
+    }
+    return ret;
+}
 
 
-// /*
-//   A prototype of open() syscall w/ mode
+/*
+  A prototype of open() syscall w/ mode
 
-//   *** EXPERIMENTAL ***
-// */
+  *** EXPERIMENTAL ***
+*/
 
-// int _open(const char *path, int oflags, mode_t mode) {
-//     dstream << "Call open() on path " << path << " with oflags " << oflags << " and mode " << mode << endl;
-//     char* real_path = normalize_path(path);
-//     if (real_path == NULL) {
-//         dstream << "Invalid path, return -1" << endl;
-//         return -1;
-//     }
-//     if (is_plfs_path(real_path) == 0) {
-//         dstream << "Not PLFS path, return standard open()";
-//         free(real_path);
-//         return open(path, oflags, mode);
-//     }
-//     FILE* file = normalized_plfs_open(real_path, oflags, mode);
-//     if (file == NULL) {
-//         dstream << "normalized_plfs_open() failed" << endl;
-//         return -1;
-//     }
-//     int fake_fd = fileno(file);
-//     fd_cfile_table[fake_fd] = file;
-//     dstream << "open() returns " << fake_fd << endl;
-//     return fake_fd;
-// }
+int open(const char *path, int oflags, mode_t mode) {
+    real_open = (int (*)(const char*, int, mode_t))dlsym(RTLD_NEXT, "open");
+
+    dstream << "Call open() on path " << path << " with oflags " << oflags << " and mode " << mode << endl;
+    char* real_path = normalize_path(path);
+    if (real_path == NULL) {
+        dstream << "Invalid path, return -1" << endl;
+        return -1;
+    }
+    if (is_plfs_path(real_path) == 0) {
+        dstream << "Not PLFS path, return standard open()";
+        free(real_path);
+        return real_open(path, oflags, mode);
+    }
+    FILE* file = normalized_plfs_open(real_path, oflags, mode);
+    if (file == NULL) {
+        dstream << "normalized_plfs_open() failed" << endl;
+        return -1;
+    }
+    int fake_fd = fileno(file);
+    fd_cfile_table[fake_fd] = file;
+    dstream << "open() returns " << fake_fd << endl;
+    return fake_fd;
+}
 
 // /*
 //   The w/o mode version of open() sscall
@@ -691,53 +693,58 @@ FILE* fopen(const char *path, const char* mode) {
 }
 
 
-// int fclose(FILE* file) {
-//     dstream << "Call close on file" << file << endl;
-//     int fd = fileno(file);
-//     if (fd_file_table.count(fd) == 0) {
-//         dstream << "File descriptor not found, return standard fclose()" << endl;
-//         return fclose(file);
-//     }
-//     int ret = normalized_plfs_close(file);
-//     if (ret != 0) {
-//         dstream << "normalized_plfs_close() failed" << endl;
-//         return -1;
-//     }
-//     dstream << "fclose() returns " << ret << endl;
-//     return ret;
-// }
+int fclose(FILE* file) {
+    real_fclose = (int (*)(FILE*))dlsym(RTLD_NEXT, "fclose");
+
+    dstream << "Call close on file" << file << endl;
+    int fd = fileno(file);
+    if (fd_file_table.count(fd) == 0) {
+        dstream << "File descriptor not found, return standard fclose()" << endl;
+        return real_fclose(file);
+    }
+    int ret = normalized_plfs_close(file);
+    if (ret != 0) {
+        dstream << "normalized_plfs_close() failed" << endl;
+        return -1;
+    }
+    dstream << "fclose() returns " << ret << endl;
+    return ret;
+}
 
 
-// size_t fread(void* ptr, size_t size, size_t nmemb, FILE* stream) {
-//     ssize_t ret;
-//     int fd = fileno(stream);
-//     dstream << "Trying to read file. fake_fd = " << fd << endl;
-//     if (fd_file_table.count(fd) == 0) {
-//         dstream << "Not in table, return normal fread()" << endl;
-//         ret = fread(ptr, size, nmemb, stream);
-//     }
-//     else {
-//         dstream << "File descriptor found in global fd table" << endl;
-//         Plfs_file* plfs_file = fd_file_table[fd];
-//         long offset = ftell(stream);
-//         dstream << "Current offset = " << offset << endl;
-//         plfs_error_t err = PLFS_EAGAIN;
-//         while (err == PLFS_EAGAIN) {
-//             err = plfs_read(plfs_file->plfs_fd, (char*)ptr, nmemb*size, offset, &ret);
-//         }
-//         if (err == PLFS_SUCCESS) {
-//             dstream << "File read succeed, read " << ret << " units" << endl;
-//             fseek(stream, ret, SEEK_CUR);
-//             dstream << "New offset is " << ftell(stream) << endl;
-//         }
-//         else {
-//             errno = plfs_error_to_errno(err);
-//             dstream << "- PLFS read failed, it returns " << err;
-//         }
-//     }
-//     dstream << "fread() returns " << ret << endl;
-//     return ret;
-// }
+size_t fread(void* ptr, size_t size, size_t nmemb, FILE* stream) {
+    real_fread = (size_t (*)(void*, size_t, size_t, FILE*))dlsym(RTLD_NEXT, "fread");
+
+
+    ssize_t ret;
+    int fd = fileno(stream);
+    dstream << "Trying to read file. fake_fd = " << fd << endl;
+    if (fd_file_table.count(fd) == 0) {
+        dstream << "Not in table, return normal fread()" << endl;
+        ret = real_fread(ptr, size, nmemb, stream);
+    }
+    else {
+        dstream << "File descriptor found in global fd table" << endl;
+        Plfs_file* plfs_file = fd_file_table[fd];
+        long offset = ftell(stream);
+        dstream << "Current offset = " << offset << endl;
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_read(plfs_file->plfs_fd, (char*)ptr, nmemb*size, offset, &ret);
+        }
+        if (err == PLFS_SUCCESS) {
+            dstream << "File read succeed, read " << ret << " units" << endl;
+            fseek(stream, ret, SEEK_CUR);
+            dstream << "New offset is " << ftell(stream) << endl;
+        }
+        else {
+            errno = plfs_error_to_errno(err);
+            dstream << "- PLFS read failed, it returns " << err;
+        }
+    }
+    dstream << "fread() returns " << ret << endl;
+    return ret;
+}
 
 
 // size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
