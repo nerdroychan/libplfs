@@ -1,16 +1,11 @@
 # Compiler
 CC=g++
 
-# PLFS dynamic library path
-PLFS_LIB_PATH="/usr/local/lib/"
+stdplfs.so : stdplfs.cpp
+	$(CC) -fPIC -shared -o stdplfs.so stdplfs.cpp -g -Wl,-R/usr/local/lib -L/usr/local/lib -lplfs -ldl
 
-CCFLAGS=-std=c++11
-PARAMS=-Wl,-R$(PLFS_LIB_PATH) -g -L$(PLFS_LIB_PATH) -lplfs
-
-test : libplfs.cpp
-	$(CC) $(CCFLAGS) -c libplfs.cpp -o libplfs.o
-	$(CC) $(CCFLAGS) -o test libplfs.o $(PARAMS)
-	rm libplfs.o
+test : test.cpp
+	$(CC) -o test test.cpp
 
 clean :
-	rm -f *.so *.o test
+	rm -f *.so *.o
