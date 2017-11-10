@@ -700,12 +700,15 @@ size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
     else {
         Plfs_file* plfs_file = fd_file_table[fd];
         long offset = ftell(stream);
+        // long offset = lseek(fd, 0, SEEK_CUR);
+
         plfs_error_t err = PLFS_EAGAIN;
         while (err == PLFS_EAGAIN) {
             err = plfs_write(plfs_file->plfs_fd, (const char*)ptr, nmemb*size, offset, getpid(), &ret);
         }
         if (err == PLFS_SUCCESS) {
             fseek(stream, ret, SEEK_CUR);
+            // lseek(fd, offset+ret, SEEK_SET);
         }
         else {
             errno = plfs_error_to_errno(err);
