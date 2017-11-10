@@ -10,8 +10,8 @@
 #include <string>
 #include <iostream>
 #include <vector>
+#include <unordered_map>
 
-std::ostream cnull(0); // A temporary solution for /dev/null like stream
 
 static int (*real_open)(const char*, int, ...) = NULL;
 static int (*real_close)(int) = NULL;
@@ -49,30 +49,9 @@ struct Plfs_file {
     char* real_path;
 };
 
-std::map<unsigned long, Plfs_file*> path_file_table;
-std::map<int, Plfs_file*> fd_file_table;
-std::map<int, FILE*> fd_cfile_table;
-
-void print_tables() {
-    for (std::map<int, Plfs_file*>::const_iterator i=fd_file_table.begin(); i!=fd_file_table.end(); i++) {
-        int key = i->first;
-        Plfs_file* value = i->second;
-        std::cout << key << " -> " << value << std::endl;
-    }
-    for (std::map<int, FILE*>::const_iterator i=fd_cfile_table.begin(); i!=fd_cfile_table.end(); i++) {
-        int key = i->first;
-        FILE* value = i->second;
-        std::cout << key << " -> " << value << std::endl;
-    }
-    for (std::map<unsigned long, Plfs_file*>::const_iterator i=path_file_table.begin(); i!=path_file_table.end(); i++) {
-        unsigned long key = i->first;
-        Plfs_file* value = i->second;
-        std::cout << "hashed path: " << key << std::endl;
-        std::cout << "    plfs_fd: " << value->plfs_fd;
-        std::cout << "    oflags : " << value->oflags;
-        std::cout << "    ref_num: " << value->ref_num << std::endl;
-    }
-}
+std::unordered_map<unsigned long, Plfs_file*> path_file_table;
+std::unordered_map<int, Plfs_file*> fd_file_table;
+std::unordered_map<int, FILE*> fd_cfile_table;
 
 /*
   VERY IMPORTANT
@@ -161,6 +140,7 @@ FILE* normalized_plfs_open(const char* path, int oflags, mode_t mode) {
 
 
 int open(const char *path, int oflags, ...) {
+    // printf("open() %s\n", path);
     real_open = (int (*)(const char*, int, ...))dlsym(RTLD_NEXT, "open");
 
     mode_t mode = 0;
@@ -181,9 +161,11 @@ int open(const char *path, int oflags, ...) {
     }
     FILE* file = normalized_plfs_open(real_path, oflags, mode);
     if (file == NULL) {
+        // printf("open() failed\n");
         return -1;
     }
     int fake_fd = fileno(file);
+    // printf("open() succeed with fd %d\n", fake_fd);
     fd_cfile_table[fake_fd] = file;
     return fake_fd;
 }
@@ -250,6 +232,7 @@ ssize_t read(int fd, void *buf, size_t nbytes) {
 
 
 ssize_t write(int fd, const void *buf, size_t nbytes) {
+    // printf("write() on %d\n", fd);
     real_write = (ssize_t (*)(int, const void*, size_t))dlsym(RTLD_NEXT, "write");
 
     ssize_t ret;
@@ -260,12 +243,13 @@ ssize_t write(int fd, const void *buf, size_t nbytes) {
         Plfs_file* plfs_file = fd_file_table[fd];
         off_t offset = lseek(fd, 0, SEEK_CUR);
         plfs_error_t err = PLFS_EAGAIN;
+        // printf("plfs_fd %p\n", plfs_file->plfs_fd);
         while (err == PLFS_EAGAIN) {
             err = plfs_write(plfs_file->plfs_fd, (const char*)buf, nbytes, offset, getpid(), &ret);
         }
         if (err == PLFS_SUCCESS) {
+            // printf("SUCC \n");
             lseek(fd, offset+ret, SEEK_SET);
-            // plfs_sync(plfs_file->plfs_fd);
         }
         else {
             errno = plfs_error_to_errno(err);
@@ -586,7 +570,7 @@ int truncate(const char *path, off_t length) {
 void sync(void) {
     real_sync = (void (*)())dlsym(RTLD_NEXT, "sync");
 
-    for (std::map<int, Plfs_file*>::iterator i=fd_file_table.begin(); i!=fd_file_table.end(); i++) {
+    for (std::unordered_map<int, Plfs_file*>::iterator i=fd_file_table.begin(); i!=fd_file_table.end(); i++) {
         Plfs_file* f = i->second;
         plfs_sync(f->plfs_fd);
     }
@@ -649,7 +633,7 @@ int fclose(FILE* file) {
     real_fclose = (int (*)(FILE*))dlsym(RTLD_NEXT, "fclose");
 
     int fd = fileno(file);
-    if (fd_cfile_table.count(fd) == 0) {
+    if (fd_file_table.count(fd) == 0) {
         return real_fclose(file);
     }
     Plfs_file* plfs_file = fd_file_table[fd];
@@ -684,7 +668,7 @@ size_t fread(void* ptr, size_t size, size_t nmemb, FILE* stream) {
 
     ssize_t ret;
     int fd = fileno(stream);
-    if (fd_cfile_table.count(fd) == 0) {
+    if (fd_file_table.count(fd) == 0) {
         ret = real_fread(ptr, size, nmemb, stream);
     }
     else {
@@ -710,7 +694,7 @@ size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
 
     ssize_t ret;
     int fd = fileno(stream);
-    if (fd_cfile_table.count(fd) == 0) {
+    if (fd_file_table.count(fd) == 0) {
         ret = real_fwrite(ptr, size, nmemb, stream);
     }
     else {
