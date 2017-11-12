@@ -64,16 +64,19 @@ int main(int argc, char** argv) {
     gettimeofday(&start, NULL);
     // b = open("/mnt/plfs/t1", O_RDWR);
     a = fopen("/mnt/plfs/t1", "w");
+    //int fd = fileno(a);
     for (int i=0; i<times; i++) {
         // printf("%d ", i);
         // fflush(stdout);
         // a = fopen("/mnt/plfs/t1", "a+");
         // std::cout << lseek(b, 0, SEEK_CUR) << std::endl;
         fwrite(input[i], sizeof(char), strlen(input[i]), a);
+//        write(fd, input[i], strlen(input[i]));
         // fwrite(input2, sizeof(char), 1, a);
         // write(b, input[i], strlen(input[i]));
         
     }
+    //close(fd);
     fclose(a);
         // close(b); 
     gettimeofday(&stop, NULL);
