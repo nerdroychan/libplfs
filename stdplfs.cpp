@@ -6,24 +6,66 @@
 #include <unistd.h>
 #include <sys/time.h>
 
-
-/*
-  VERY IMPORTANT
-  TODO !!!
-*/
-
 char* normalize_path(const char* path) {
-    // char* tmp_path = (char*)malloc(sizeof(char)*strlen(path));
-    // strncpy(tmp_path, path, strlen(path));
-    // char* real_path = realpath(tmp_path, NULL);
-    // char* t = tmp_path + strlen(path) - 1;
-    // while (real_path == NULL && t >= tmp_path) {
-    //     while (*t != '/' && t >= tmp_path) t--;
-    //     *t = '\0';
-    //     real_path = realpath(tmp_path, NULL);
-    // }
-    // return real_path;
-    return realpath(path, NULL);
+    if (path == NULL) return NULL;
+    int path_len = strlen(path);
+    if (path_len < 1) return NULL;
+
+    char* str = (char*)malloc(sizeof(char)*(path_len+1));
+    memcpy(str, path, sizeof(char)*(path_len+1));
+    
+    if (str[0] != '/') { // need cwd
+        char* cwd = getcwd(NULL, 0);
+        int cwd_len = strlen(cwd);
+        cwd = (char*)realloc(cwd, sizeof(char)*(path_len+cwd_len+2));
+        cwd[cwd_len] = '/';
+        memcpy(cwd+cwd_len+1, str, sizeof(char)*(path_len+1));
+        free(str);
+        str = cwd;
+    }
+
+    bool is_directory = (str[strlen(str)-1] == '/');
+
+    char* buf[255];
+    memset(buf, 0, sizeof(char*)*255);
+    char *token = strtok(str, "/");
+    int counter = 0;
+    while (token != NULL) {
+        if (strcmp(token, ".") == 0) {
+            token = strtok(NULL, "/");
+            continue;
+        }
+        if (strncmp(token, "..", 2) != 0) {
+            buf[counter++] = token;
+        }
+        else {
+            counter--;
+            for (int i=2; i<strlen(token); i++) {
+                if (token[i] == '.') counter--;
+            }
+        }
+        if (counter < 0) return NULL;
+        token = strtok(NULL, "/");
+    }
+    int out_len = 0;
+    for (int i=0; i<counter; i++) {
+        out_len += strlen(buf[i]);
+    }
+    char* out_str = (char*)malloc(sizeof(char)*(out_len+counter+1));
+    int t = 0;
+    for (int i=0; i<counter; i++) {
+        out_str[t++] = '/';
+        int t_len = strlen(buf[i]);
+        memcpy(out_str+t, buf[i], t_len);
+        t += t_len;
+    }
+    if (is_directory) {
+        out_str = (char*)realloc(out_str, sizeof(char)*(++out_len+counter+1));
+        out_str[out_len+counter-1] = '/';
+    }
+    out_str[out_len+counter] = '\0';
+    free(str);
+    return 0;
 }
 
 
@@ -40,6 +82,7 @@ unsigned long string_hash(const char *str) {
     while (c = *str++) hash = ((hash << 5) + hash) + c;
     return hash;
 }
+
 
 
 // Supposed that the path here is :
@@ -564,7 +607,7 @@ int fdatasync(int fd) {
 
 
 FILE* fopen(const char *path, const char* mode) {
-    real_fopen = (FILE* (*)(const char*, const char*))dlsym(RTLD_NEXT, "fopen");
+    if (real_fopen == NULL) real_fopen = (FILE* (*)(const char*, const char*))dlsym(RTLD_NEXT, "fopen");
 
     char* real_path = normalize_path(path);
     if (real_path == NULL) {
@@ -584,7 +627,7 @@ FILE* fopen(const char *path, const char* mode) {
 
 
 int fclose(FILE* file) {
-    real_fclose = (int (*)(FILE*))dlsym(RTLD_NEXT, "fclose");
+    if (real_fclose == NULL) real_fclose = (int (*)(FILE*))dlsym(RTLD_NEXT, "fclose");
 
     int fd = fileno(file);
     if (fd_file_table.count(fd) == 0) {
@@ -618,7 +661,7 @@ int fclose(FILE* file) {
 
 
 size_t fread(void* ptr, size_t size, size_t nmemb, FILE* stream) {
-    real_fread = (size_t (*)(void*, size_t, size_t, FILE*))dlsym(RTLD_NEXT, "fread");
+    if (real_fread == NULL) real_fread = (size_t (*)(void*, size_t, size_t, FILE*))dlsym(RTLD_NEXT, "fread");
 
     ssize_t ret;
     int fd = fileno(stream);
@@ -644,7 +687,7 @@ size_t fread(void* ptr, size_t size, size_t nmemb, FILE* stream) {
 
 
 size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
-    real_fwrite = (size_t (*)(const void*, size_t, size_t, FILE*))dlsym(RTLD_NEXT, "fwrite");
+    if (real_fwrite == NULL) real_fwrite = (size_t (*)(const void*, size_t, size_t, FILE*))dlsym(RTLD_NEXT, "fwrite");
 
     ssize_t ret;
     int fd = fileno(stream);
