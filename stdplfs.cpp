@@ -6,6 +6,17 @@
 #include <unistd.h>
 #include <sys/time.h>
 
+/*
+  Path normalization
+  - convert relative path string to absolute path string
+    without system calls and FUSE, pure string processing
+    this implementation works possibly...
+    dunno if there are any bugs
+
+  Note: the return value is malloc(ed), so the caller should
+        free the returned string in case of memory leak
+*/
+
 char* normalize_path(const char* path) {
     if (path == NULL) return NULL;
     int path_len = strlen(path);
@@ -480,10 +491,11 @@ int utimes(const char *filename, const struct timeval times[2]) {
     }
     else {
         utimbuf* _times = NULL;
+        utimbuf __times = {0, 0};
         if (times != NULL) {
-            _times = (utimbuf*)malloc(sizeof(utimbuf));
-            _times->actime = times[0].tv_sec;
-            _times->modtime = times[1].tv_sec;
+            __times.actime = times[0].tv_sec;
+            __times.modtime = times[1].tv_sec;
+            _times = &__times;
         }
         plfs_error_t err = plfs_utime(real_path, _times);
         if (err != PLFS_SUCCESS) {
@@ -497,6 +509,37 @@ int utimes(const char *filename, const struct timeval times[2]) {
     free(real_path);
     return ret;
 }
+
+int futimes(int fd, const struct timeval times[2]) {
+    real_futimes = (int (*)(int, const struct timeval[2]))dlsym(RTLD_NEXT, "futimes");
+
+    int ret;
+    if (fd_file_table.count(fd) == 0) {
+        ret = real_futimes(fd, times);
+    }
+    else {
+        char* real_path = fd_file_table[fd]->real_path;
+        utimbuf* _times = NULL;
+        utimbuf __times = {0, 0};
+        if (times != NULL) {
+            __times.actime = times[0].tv_sec;
+            __times.modtime = times[1].tv_sec;
+            _times = &__times;
+        }
+        plfs_error_t err = plfs_utime(real_path, _times);
+        if (err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+            ret = -1;
+        }
+        else {
+            ret = 0;
+        }
+    }
+    return ret;
+} 
+
+// todo: int futimens();
+
 
 
 ssize_t pread(int fd, void *buf, size_t count, off_t offset) {

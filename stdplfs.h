@@ -16,6 +16,7 @@ static int (*real_dup2)(int, int) = NULL;
 static int (*real_dup3)(int, int, int) = NULL;
 static int (*real_utime)(const char*, const struct utimbuf*) = NULL;
 static int (*real_utimes)(const char*, const struct timeval[2]) = NULL;
+static int (*real_futimes)(int, const struct timeval[2]) = NULL;
 static ssize_t (*real_pread)(int, void*, size_t, off_t) = NULL;
 static ssize_t (*real_pwrite)(int, const void*, size_t, off_t) = NULL;
 static int (*real_truncate)(const char*, off_t) = NULL;
