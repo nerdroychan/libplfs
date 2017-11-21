@@ -17,6 +17,7 @@ static int (*real_dup3)(int, int, int) = NULL;
 static int (*real_utime)(const char*, const struct utimbuf*) = NULL;
 static int (*real_utimes)(const char*, const struct timeval[2]) = NULL;
 static int (*real_futimes)(int, const struct timeval[2]) = NULL;
+static int (*real_futimens)(int, const struct timespec[2]) = NULL;
 static ssize_t (*real_pread)(int, void*, size_t, off_t) = NULL;
 static ssize_t (*real_pwrite)(int, const void*, size_t, off_t) = NULL;
 static int (*real_truncate)(const char*, off_t) = NULL;
@@ -28,6 +29,9 @@ static FILE* (*real_fopen)(const char*, const char*) = NULL;
 static int (*real_fclose)(FILE*) = NULL;
 static size_t (*real_fread)(void*, size_t, size_t, FILE*) = NULL;
 static size_t (*real_fwrite)(const void*, size_t, size_t, FILE*) = NULL;
+static int (*real_fscanf)(FILE*, const char*, ...) = NULL;
+static int (*real_fgetc)(FILE*) = NULL;
+
 
 struct Plfs_file {
     Plfs_fd* plfs_fd;
