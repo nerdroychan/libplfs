@@ -153,10 +153,10 @@ int open(const char *path, int oflags, ...) {
 
     mode_t mode = 0;
     if ((oflags & O_CREAT) == O_CREAT) {
-        va_list argf;
-        va_start(argf, oflags);
-        mode = va_arg(argf, mode_t);
-        va_end(argf);
+        va_list args;
+        va_start(args, oflags);
+        mode = va_arg(args, mode_t);
+        va_end(args);
     }
 
     char* real_path = normalize_path(path);
@@ -538,8 +538,36 @@ int futimes(int fd, const struct timeval times[2]) {
     return ret;
 } 
 
-// todo: int futimens();
+int futimens(int fd, const struct timespec times[2]) {
+    real_futimens = (int (*)(int, const struct timespec[2]))dlsym(RTLD_NEXT, "futimes");
 
+    int ret;
+    if (fd_file_table.count(fd) == 0) {
+        ret = real_futimens(fd, times);
+    }
+    else {
+        char* real_path = fd_file_table[fd]->real_path;
+        utimbuf* _times = NULL;
+        utimbuf __times = {0, 0};
+        if (times != NULL) {
+            __times.actime = times[0].tv_sec;
+            __times.modtime = times[1].tv_sec;
+            _times = &__times;
+        }
+        plfs_error_t err = plfs_utime(real_path, _times);
+        if (err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+            ret = -1;
+        }
+        else {
+            ret = 0;
+        }
+    }
+    return ret;
+}
+
+// todo: futimensat (dir*)
+// todo: utimenaat (dir*)
 
 
 ssize_t pread(int fd, void *buf, size_t count, off_t offset) {
@@ -756,3 +784,72 @@ size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
     }
     return ret;
 }
+
+
+int fscanf(FILE *stream, const char *format, ...) {
+    if (real_fscanf == NULL) real_fscanf = (int (*)(FILE*, const char*, ...))dlsym(RTLD_NEXT, "fscanf");
+
+    int ret;
+    int fd = fileno(stream);
+
+    va_list args;
+    va_start(args, format);
+
+    if (fd_file_table.count(fd) == 0) {
+        char bufo[BUFSIZ];
+        char buft[BUFSIZ];
+        Plfs_file* plfs_file = fd_file_table[fd];
+        long offset = ftell(stream);
+        ssize_t bytes;
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_read(plfs_file->plfs_fd, (char*)bufo, BUFSIZ, offset, &bytes);
+        }
+        if (err == PLFS_SUCCESS) {
+            ret = vsscanf(bufo, format, args);
+            int n = vsprintf(buft, format, args);
+            fseek(stream, n, SEEK_CUR);
+        }
+        else {
+            errno = plfs_error_to_errno(err);
+            ret = EOF;
+        }
+    }
+    else {
+        ret = real_fscanf(stream, format, args);
+    }
+
+    va_end(args);
+    return ret;
+}
+
+
+int fgetc(FILE* stream) {
+    if (real_fgetc == NULL) real_fgetc = (int (*)(FILE*))dlsym(RTLD_NEXT, "fgetc");
+
+    int ret;
+    int fd = fileno(stream);
+    if (fd_file_table.count(fd) == 0) {
+        ret = real_fgetc(stream);
+    }
+    else {
+        Plfs_file* plfs_file = fd_file_table[fd];
+        long offset = ftell(stream);
+        ssize_t bytes;
+        char buf;
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_read(plfs_file->plfs_fd, &buf, sizeof(char), offset, &bytes);
+        }
+        if (err == PLFS_SUCCESS) {
+            fseek(stream, bytes, SEEK_CUR);
+        }
+        else {
+            errno = plfs_error_to_errno(err);
+            ret = EOF;
+        }
+    }
+    return ret;
+}
+
+
