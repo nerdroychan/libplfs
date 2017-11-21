@@ -31,6 +31,9 @@ static size_t (*real_fread)(void*, size_t, size_t, FILE*) = NULL;
 static size_t (*real_fwrite)(const void*, size_t, size_t, FILE*) = NULL;
 static int (*real_fscanf)(FILE*, const char*, ...) = NULL;
 static int (*real_fgetc)(FILE*) = NULL;
+static char* (*real_fgets)(char*, int, FILE*) = NULL;
+static int (*real_ungetc)(int, FILE*) = NULL;
+static int (*real_fputc)(int, FILE*) = NULL;
 
 
 struct Plfs_file {
