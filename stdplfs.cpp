@@ -853,3 +853,104 @@ int fgetc(FILE* stream) {
 }
 
 
+char* fgets(char* s, int size, FILE* stream) {
+    if (real_fgets == NULL) real_fgets = (char* (*)(char*, int, FILE*))dlsym(RTLD_NEXT, "fgets");
+
+    char* ret = NULL;
+    int fd = fileno(stream);
+    if (fd_file_table.count(fd) == 0) {
+        ret = real_fgets(s, size, stream);
+    }
+    else {
+        Plfs_file* plfs_file = fd_file_table[fd];
+        long offset = ftell(stream);
+        ssize_t bytes;
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_read(plfs_file->plfs_fd, s, size-1, offset, &bytes);
+        }
+        if (err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+            ret = NULL;
+            stream->_flags |= _IO_ERR_SEEN;
+        }
+        else if (bytes == 0) {
+            stream->_flags |= _IO_EOF_SEEN;
+            ret = NULL;
+        }
+        else {
+            char* eol = (char*)memchr((void*)s, '\n', bytes);
+            if (eol == NULL) {
+                s[size-1] = '\0';
+                fseek(stream, bytes, SEEK_CUR);
+            }
+            else {
+                *(++eol) = '\0';
+                fseek(stream, eol-s, SEEK_CUR);
+            }
+            ret = s;
+        }
+    }
+    return ret;
+}
+
+
+int getc(FILE* stream) {
+    return fgetc(stream);
+}
+
+
+// int _IO_getc(_IO_FILE *__fp) {
+//     return fgetc(__fp);
+// }
+
+
+// getchar()
+// putchar()
+// THese two method should not be implemented
+// but it was implemented in LDPLFS, will check later.
+
+
+int ungetc(int c, FILE* stream) {
+    if (real_ungetc == NULL) real_ungetc = (int (*)(int, FILE*))dlsym(RTLD_NEXT, "ungetc");
+
+    int ret;
+    int fd = fileno(stream);
+    if (fd_file_table.count(fd) == 0) {
+        ret = real_ungetc(c, stream);
+    }
+    else {
+        ret = c;
+        fseek(stream, -1, SEEK_CUR);
+    }
+    return ret;
+}
+
+
+int fputc(int c, FILE* stream) {
+    if (real_fputc == NULL) real_fputc = (int (*)(int, FILE*))dlsym(RTLD_NEXT, "fputc");
+
+    int ret;
+    int fd = fileno(stream);
+    if (fd_file_table.count(fd) == 0) {
+        ret = real_fputc(c, stream);
+    }
+    else {
+        Plfs_file* plfs_file = fd_file_table[fd];
+        long offset = ftell(stream);
+        ssize_t bytes;
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_write(plfs_file->plfs_fd, (const char*)&c, 1, offset, getpid(), &bytes);
+        }
+        if (err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+            ret = EOF;
+        }
+        else {
+            fseek(stream, bytes, SEEK_CUR);
+            ret = c;
+        }
+    }
+    return ret;
+}
