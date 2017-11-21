@@ -907,7 +907,8 @@ int getc(FILE* stream) {
 
 // getchar()
 // putchar()
-// THese two method should not be implemented
+// puts()
+// THese methods should not be implemented
 // but it was implemented in LDPLFS, will check later.
 
 
@@ -953,4 +954,106 @@ int fputc(int c, FILE* stream) {
         }
     }
     return ret;
+}
+
+
+// int _IO_putc();
+
+int fputs(const char* s, FILE* stream) {
+    if (real_fputs == NULL) real_fputs = (int (*)(const char*, FILE*))dlsym(RTLD_NEXT, "fputc");
+
+    int ret = -1;
+    int fd = fileno(stream);
+    if (fd_file_table.count(fd) == 0) {
+        ret = real_fputs(s, stream);
+    }
+    else {
+        Plfs_file* plfs_file = fd_file_table[fd];
+        long offset = ftell(stream);
+        ssize_t bytes;
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_write(plfs_file->plfs_fd, s, strlen(s), offset, getpid(), &bytes);
+        }
+        if (err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+            ret = EOF;
+        }
+        else {
+            fseek(stream, bytes, SEEK_CUR);
+            ret = bytes;
+        }
+    }
+    return ret;
+}
+
+
+int putc(int c, FILE* stream) {
+    return fputc(c, stream);
+}
+
+
+int vfprintf(FILE* stream, const char* format, va_list args) {
+    if (real_vfprintf == NULL) real_vfprintf = (int (*)(FILE*, const char*, va_list))dlsym(RTLD_NEXT, "vfprintf");
+
+    int ret;
+    int fd = fileno(stream);
+    if (fd_file_table.count(fd) == 0) {
+        ret = real_vfprintf(stream, format, args);
+    }
+    else {
+        Plfs_file* plfs_file = fd_file_table[fd];
+        long offset = ftell(stream);
+        ssize_t bytes;
+        char* buf = NULL;
+        int len = vasprintf(&buf, format, args);
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_write(plfs_file->plfs_fd, buf, len, offset, getpid(), &bytes);
+        }
+        if (err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+            ret = -1;
+        }
+        else {
+            fseek(stream, bytes, SEEK_CUR);
+            ret = bytes;
+        }
+        free(buf);
+    }
+    return ret;
+}
+
+
+int vprintf(const char* format, va_list args) {
+    return vfprintf(stdout, format, args);
+}
+
+
+int fprintf(FILE* stream, const char* format, ...) {
+    int ret;
+    va_list args;
+
+    va_start(args, format);
+    ret = vfprintf(stream, format, args);
+    va_end(args);
+
+    return ret;
+}
+
+
+int printf(const char* format, ...) {
+    int ret;
+    va_list args;
+
+    va_start(args, format);
+    ret = vfprintf(stdout, format, args);
+    va_end(args);
+    
+    return ret;
+}
+
+
+int vdprintf(int fd, const char* format, va_list ap) {
+    
 }

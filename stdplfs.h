@@ -34,6 +34,8 @@ static int (*real_fgetc)(FILE*) = NULL;
 static char* (*real_fgets)(char*, int, FILE*) = NULL;
 static int (*real_ungetc)(int, FILE*) = NULL;
 static int (*real_fputc)(int, FILE*) = NULL;
+static int (*real_fputs)(const char*, FILE*) = NULL;
+static int (*real_vfprintf)(FILE*, const char*, va_list) = NULL;
 
 
 struct Plfs_file {
