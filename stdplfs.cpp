@@ -1055,5 +1055,57 @@ int printf(const char* format, ...) {
 
 
 int vdprintf(int fd, const char* format, va_list ap) {
-    
+    if (real_vdprintf == NULL) real_vdprintf = (int (*)(int, const char*, va_list))dlsym(RTLD_NEXT, "vdprintf");
+
+    int ret;
+    if (fd_cfile_table.count(fd) == 0) {
+        ret = real_vdprintf(fd, format, ap);
+    }
+    else {
+        Plfs_file* plfs_file = fd_file_table[fd];
+        long offset = lseek(fd, 0, SEEK_CUR);
+        if (offset != (off_t)-1) {
+            char* buf = NULL;
+            int len = vasprintf(&buf, format, ap);
+
+            ssize_t bytes;
+            plfs_error_t err = plfs_write(plfs_file->plfs_fd, buf, len, offset, getpid(), &bytes);
+            if (err != PLFS_SUCCESS) {
+                errno = plfs_error_to_errno(err);
+                ret = -1;
+            }
+            else {
+                lseek(fd, offset+ret, SEEK_SET);
+                ret = bytes;
+            }
+            free(buf);
+        }
+    }
+    return ret; 
 }
+
+
+int dprintf(int fd, const char* format, ...) {
+    int ret;
+    va_list args;
+
+    va_start(args, format);
+    ret = vdprintf(fd, format, args);
+    va_end(args);
+    
+    return ret;
+}
+
+
+int fflush(FILE* stream) {
+    if (real_fflush == NULL) real_fflush = (int (*)(FILE*))dlsym(RTLD_NEXT, "fflush");
+
+
+    if (stream == NULL) {
+        sync();
+        return real_fflush(stream);
+    }
+    return syncfs(fileno(stream));
+}
+
+

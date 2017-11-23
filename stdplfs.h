@@ -1,5 +1,6 @@
 #include "plfs.h"
 #include <unordered_map>
+#include <dirent.h>
 
 static int (*real_open)(const char*, int, ...) = NULL;
 static int (*real_close)(int) = NULL;
@@ -36,6 +37,8 @@ static int (*real_ungetc)(int, FILE*) = NULL;
 static int (*real_fputc)(int, FILE*) = NULL;
 static int (*real_fputs)(const char*, FILE*) = NULL;
 static int (*real_vfprintf)(FILE*, const char*, va_list) = NULL;
+static int (*real_vdprintf)(int, const char*, va_list) = NULL;
+static int (*real_fflush)(FILE*) = NULL;
 
 
 struct Plfs_file {
@@ -49,3 +52,4 @@ struct Plfs_file {
 std::unordered_map<unsigned long, Plfs_file*> path_file_table;
 std::unordered_map<int, Plfs_file*> fd_file_table;
 std::unordered_map<int, FILE*> fd_cfile_table;
+std::unordered_map<int, DIR*> fd_dir_table;
