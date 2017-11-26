@@ -1100,12 +1100,101 @@ int dprintf(int fd, const char* format, ...) {
 int fflush(FILE* stream) {
     if (real_fflush == NULL) real_fflush = (int (*)(FILE*))dlsym(RTLD_NEXT, "fflush");
 
-
     if (stream == NULL) {
         sync();
         return real_fflush(stream);
     }
     return syncfs(fileno(stream));
+}
+
+
+ssize_t readlink(const char *path, char *buf, size_t bufsiz) {
+    if (real_readlink == NULL) real_readlink = (ssize_t (*)(const char*, char*, size_t))dlsym(RTLD_NEXT, "readlink");
+
+    int ret = 0;
+    char* real_path = normalize_path(path);
+    if (is_plfs_path(real_path)) {
+        plfs_error_t err = plfs_readlink(real_path, buf, bufsiz, &ret);
+        if (err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+            ret = -1;
+        }
+        else {
+            ret = 0;
+        }
+    } else {
+        ret = real_readlink(path, buf, bufsiz);
+    }
+    free(real_path);
+    return ret;
+}
+
+
+int link(const char *oldpath, const char *newpath) {
+    if (real_link == NULL) real_link = (int (*)(const char*, const char*))dlsym(RTLD_NEXT, "link");
+
+    int ret = 0;
+    char *real_old_path = normalize_path(oldpath);
+    char *real_new_path = normalize_path(newpath);
+    if (is_plfs_path(real_old_path) || is_plfs_path(real_new_path)) {
+        ret = -1;
+        errno = ENOSYS;
+    }
+    else {
+        ret = real_link(oldpath, newpath);
+    }
+    free(real_old_path);
+    free(real_new_path);
+    
+    return ret;
+}
+
+
+int symlink(const char *oldpath, const char *newpath) {
+    if (real_symlink == NULL) real_symlink = (int (*)(const char*, const char*))dlsym(RTLD_NEXT, "symlink");
+
+    int ret = 0;
+    
+    char *real_old_path = normalize_path(oldpath);
+    char *real_new_path = normalize_path(newpath);
+    if (is_plfs_path(real_old_path) && is_plfs_path(real_new_path)) {
+        plfs_error_t err = plfs_link(real_old_path, real_new_path);
+        if (err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+            ret = -1;
+        }
+        else {
+            ret = 0;
+        }
+    } else {
+        ret = real_link(oldpath, newpath);
+    }
+    
+    free(real_old_path);
+    free(real_new_path);
+    
+    return ret;
+}
+
+
+int unlink(const char *pathname) {
+    if (real_unlink == NULL) real_unlink = (int (*)(const char*))dlsym(RTLD_NEXT, "unlink");
+   
+    int ret = 0;
+    char* real_path = normalize_path(pathname);
+    if (is_plfs_path(real_path)) {
+        plfs_error_t err = plfs_unlink(real_path);
+        if(err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+            ret = -1;
+        } else {
+            ret = 0;
+        }
+    } else {
+        ret = real_unlink(pathname);
+    }
+    free(real_path);
+    return ret;
 }
 
 

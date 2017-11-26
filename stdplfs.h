@@ -39,6 +39,10 @@ static int (*real_fputs)(const char*, FILE*) = NULL;
 static int (*real_vfprintf)(FILE*, const char*, va_list) = NULL;
 static int (*real_vdprintf)(int, const char*, va_list) = NULL;
 static int (*real_fflush)(FILE*) = NULL;
+static ssize_t (*real_readlink)(const char*, char*, size_t) = NULL;
+static int (*real_link)(const char*, const char*) = NULL;
+static int (*real_symlink)(const char*, const char*) = NULL;
+static int (*real_unlink)(const char*) = NULL;
 
 
 struct Plfs_file {
