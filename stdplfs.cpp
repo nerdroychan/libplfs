@@ -76,7 +76,7 @@ char* normalize_path(const char* path) {
     }
     out_str[out_len+counter] = '\0';
     free(str);
-    return 0;
+    return out_str;
 }
 
 
@@ -638,7 +638,7 @@ int truncate(const char *path, off_t length) {
 void sync(void) {
     real_sync = (void (*)())dlsym(RTLD_NEXT, "sync");
 
-    for (std::unordered_map<int, Plfs_file*>::iterator i=fd_file_table.begin(); i!=fd_file_table.end(); i++) {
+    for (std::map<int, Plfs_file*>::iterator i=fd_file_table.begin(); i!=fd_file_table.end(); i++) {
         Plfs_file* f = i->second;
         plfs_sync(f->plfs_fd);
     }
@@ -795,7 +795,7 @@ int fscanf(FILE *stream, const char *format, ...) {
     va_list args;
     va_start(args, format);
 
-    if (fd_file_table.count(fd) == 0) {
+    if (fd_file_table.count(fd) != 0) {
         char bufo[BUFSIZ];
         char buft[BUFSIZ];
         Plfs_file* plfs_file = fd_file_table[fd];
@@ -1198,3 +1198,170 @@ int unlink(const char *pathname) {
 }
 
 
+//unlinkat()
+
+int rename(const char *oldpath, const char *newpath) {
+    if (real_rename == NULL) real_rename = (int (*)(const char*, const char*))dlsym(RTLD_NEXT, "rename");
+    
+    int ret = 0;
+    
+    char *real_old_path = normalize_path(oldpath);
+    char *real_new_path = normalize_path(newpath);
+    if (is_plfs_path(real_old_path) && is_plfs_path(real_new_path)) {
+        plfs_error_t err = plfs_rename(real_old_path, real_new_path);
+        if(err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+            ret = -1;
+        } else {
+            ret = 0;
+        }
+    } else if (is_plfs_path(real_old_path) || is_plfs_path(real_new_path)) {
+        errno = ENOENT;
+        ret = -1;
+    } else {
+        ret = real_rename(oldpath, newpath);
+    }
+
+    free(real_old_path);
+    free(real_new_path);
+
+    return ret;
+}
+
+//renameat()
+
+int statvfs(const char *path, struct statvfs *buf){ 
+    if (real_statvfs == NULL) real_statvfs = (int (*)(const char*, struct statvfs*))dlsym(RTLD_NEXT, "statvfs");
+	int ret;
+	
+	char *real_path = normalize_path(path);
+	
+	if (is_plfs_path(real_path)) {
+		plfs_error_t err = plfs_statvfs(real_path, buf);
+		if (err != PLFS_SUCCESS) {
+			errno = plfs_error_to_errno(err);
+			ret = -1;
+		} else {
+			ret = 0;
+		}
+	} else {
+		ret = real_statvfs(path, buf);
+	}
+	
+	free(real_path);
+
+	return ret;
+}
+
+
+int fstatvfs(int fd, struct statvfs *buf) {
+    if (real_fstatvfs == NULL) real_fstatvfs = (int (*)(int, struct statvfs*))dlsym(RTLD_NEXT, "fstatvfs");
+
+    int ret;
+    if (fd_file_table.count(fd) == 0) {
+        ret = real_fstatvfs(fd, buf);
+    }
+    else {
+        char* real_path = fd_file_table[fd]->real_path;
+        plfs_error_t err = plfs_statvfs(real_path, buf);
+		if (err != PLFS_SUCCESS) {
+			errno = plfs_error_to_errno(err);
+			ret = -1;
+		} else {
+			ret = 0;
+		}
+    }
+    return ret;
+}
+
+
+// _xstat()
+// __fxstat
+//__fxstatat
+//__lxstat
+//__fxstat64
+//__lxstat64
+//__xstat64
+//__fxstatat64
+//lgetxattr
+//getxattr
+//fgetxattr
+
+int fcntl(int fd, int cmd, ...) {
+	if (real_fcntl == NULL) real_fcntl = (int (*)(int, int, ...))dlsym(RTLD_NEXT, "fcntl");
+
+    int ret;
+
+    va_list args;
+    va_start(args, cmd);
+    switch(cmd) {
+        case F_DUPFD:
+        case F_DUPFD_CLOEXEC:
+        case F_GETFD:
+        case F_SETFD:
+        case F_GETFL:
+        case F_SETFL:
+        case F_GETOWN:
+        case F_SETOWN:
+        {
+            int arg = va_arg(args, int);
+            ret = real_fcntl(fd, cmd, arg);
+            break;
+        }
+
+        case F_GETLK:
+        case F_SETLK:
+        case F_SETLKW:
+        {
+            struct flock* arg = va_arg(args ,struct flock*);
+            ret = real_fcntl(fd, cmd, arg);
+            break;
+        }
+    }
+    va_end(args);
+    
+    if (fd_file_table.count(fd) != 0) {
+        if(cmd == F_DUPFD || cmd == F_DUPFD_CLOEXEC) {
+            if(ret != -1) {
+                fd_file_table[ret] = fd_file_table[fd];
+            }
+        }
+    }
+    return ret;
+}
+
+
+//openat
+//truncate64
+
+int ftruncate(int fd, off_t length) {
+    if (real_ftruncate == NULL ) real_ftruncate = (int (*)(int, off_t))dlsym(RTLD_NEXT, "ftruncate");
+
+    int ret;
+    if (fd_file_table.count(fd) == 0) {
+        ret = real_ftruncate(fd, length);
+    }
+    else {
+        Plfs_file* plfs_file = fd_file_table[fd];
+        plfs_error_t err = plfs_trunc(NULL, plfs_file->real_path, length, 0);
+        if (err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+            ret = -1;
+        }
+        else {
+            ret = 0;
+        }
+    }
+    return ret;
+}
+
+//ftruncate64
+//open64
+//creat64
+//pread64
+//pwrite64
+//chdir
+//getcwd ???
+//getwd
+//get_current_dir_name
+//
