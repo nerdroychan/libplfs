@@ -1,5 +1,5 @@
 #include "plfs.h"
-#include <unordered_map>
+#include <map>
 #include <dirent.h>
 
 static int (*real_open)(const char*, int, ...) = NULL;
@@ -43,6 +43,11 @@ static ssize_t (*real_readlink)(const char*, char*, size_t) = NULL;
 static int (*real_link)(const char*, const char*) = NULL;
 static int (*real_symlink)(const char*, const char*) = NULL;
 static int (*real_unlink)(const char*) = NULL;
+static int (*real_rename)(const char*, const char*) = NULL;
+static int (*real_statvfs)(const char*, struct statvfs*) = NULL;
+static int (*real_fstatvfs)(int, struct statvfs*) = NULL;
+static int (*real_fcntl)(int, int, ...) = NULL;
+static int (*real_ftruncate)(int, off_t) = NULL;
 
 
 struct Plfs_file {
@@ -53,7 +58,7 @@ struct Plfs_file {
     char* real_path;
 };
 
-std::unordered_map<unsigned long, Plfs_file*> path_file_table;
-std::unordered_map<int, Plfs_file*> fd_file_table;
-std::unordered_map<int, FILE*> fd_cfile_table;
-std::unordered_map<int, DIR*> fd_dir_table;
+std::map<unsigned long, Plfs_file*> path_file_table;
+std::map<int, Plfs_file*> fd_file_table;
+std::map<int, FILE*> fd_cfile_table;
+std::map<int, DIR*> fd_dir_table;
