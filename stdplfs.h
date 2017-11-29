@@ -48,6 +48,8 @@ static int (*real_statvfs)(const char*, struct statvfs*) = NULL;
 static int (*real_fstatvfs)(int, struct statvfs*) = NULL;
 static int (*real_fcntl)(int, int, ...) = NULL;
 static int (*real_ftruncate)(int, off_t) = NULL;
+static DIR* (*real_opendir)(const char*) = NULL;
+static int (*real_closedir)(DIR*) = NULL;
 
 
 struct Plfs_file {
@@ -58,7 +60,13 @@ struct Plfs_file {
     char* real_path;
 };
 
+struct Plfs_dir {
+    char* real_path;
+    Plfs_dirp* plfs_dirp;
+};
+
 std::map<unsigned long, Plfs_file*> path_file_table;
 std::map<int, Plfs_file*> fd_file_table;
 std::map<int, FILE*> fd_cfile_table;
-std::map<int, DIR*> fd_dir_table;
+
+std::map<int, Plfs_dir*> fd_dir_table;

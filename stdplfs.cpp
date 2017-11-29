@@ -1365,3 +1365,63 @@ int ftruncate(int fd, off_t length) {
 //getwd
 //get_current_dir_name
 //
+
+DIR* opendir(const char *name) {
+    if (real_opendir == NULL) real_opendir = (DIR* (*)(const char*))dlsym(RTLD_NEXT, "opendir");
+    
+    DIR* ret;
+    struct stat fstats;
+    int flags = 0;
+
+    char* real_path = normalize_path(name);
+
+    if (is_plfs_path(real_path)) {
+        Plfs_dirp* plfs_dirp = NULL;
+        plfs_error_t err = plfs_opendir_c(real_path, &plfs_dirp);
+        if (err == PLFS_SUCCESS) {
+            ret = real_opendir("/");
+            struct Plfs_dir* plfs_dir = (struct Plfs_dir*)malloc(sizeof(struct Plfs_dir));
+            plfs_dir->real_path = real_path;
+            plfs_dir->plfs_dirp = plfs_dirp;
+            int fd = dirfd(ret);
+            fd_dir_table[fd] = plfs_dir;
+        }
+        else {
+            errno = plfs_error_to_errno(err);
+            free(real_path);
+            ret = NULL;
+        }
+    }
+    else {
+        free(real_path);
+        ret = real_opendir(name);
+    }
+    return ret;
+}
+
+
+int closedir(DIR* dirp) {
+	if (real_closedir == NULL) real_closedir = (int (*)(DIR*))dlsym(RTLD_NEXT, "closedir");
+    int ret = 0;
+    int fd = dirfd(dirp);
+
+	if (fd_dir_table.count(fd) != 0) {
+        Plfs_dir* plfs_dir = fd_dir_table[fd];
+        plfs_error_t err = plfs_closedir_c(plfs_dir->plfs_dirp);
+        if (err == PLFS_SUCCESS) {
+            free(plfs_dir->real_path);
+            fd_dir_table.erase(fd);
+            ret = real_closedir(dirp);
+        }
+        else {
+            ret = -1;
+            errno = plfs_error_to_errno(err);
+        }
+    }
+    else {
+        ret = real_closedir(dirp);
+    }
+    return ret;
+}
+
+
