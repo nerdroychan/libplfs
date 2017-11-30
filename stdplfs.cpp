@@ -1374,6 +1374,12 @@ DIR* opendir(const char *name) {
     int flags = 0;
 
     char* real_path = normalize_path(name);
+    int _len = strlen(real_path);
+    if (real_path[_len-1] != '/') {
+        real_path = (char*)realloc(real_path, (_len+2)*sizeof(char));
+        real_path[_len] = '/';
+        real_path[_len+1] = '\0';
+    }
 
     if (is_plfs_path(real_path)) {
         Plfs_dirp* plfs_dirp = NULL;
@@ -1383,6 +1389,7 @@ DIR* opendir(const char *name) {
             struct Plfs_dir* plfs_dir = (struct Plfs_dir*)malloc(sizeof(struct Plfs_dir));
             plfs_dir->real_path = real_path;
             plfs_dir->plfs_dirp = plfs_dirp;
+            plfs_dir->current_pos = 0;
             int fd = dirfd(ret);
             fd_dir_table[fd] = plfs_dir;
         }
@@ -1425,3 +1432,138 @@ int closedir(DIR* dirp) {
 }
 
 
+struct dirent* readdir(DIR *dirp) {
+	if (real_readdir == NULL) real_readdir = (struct dirent* (*)(DIR*))dlsym(RTLD_NEXT, "readdir");
+
+    struct dirent *ret;
+    int fd = dirfd(dirp);
+	if (fd_dir_table.count(fd) != 0) {
+        Plfs_dir* plfs_dir = fd_dir_table[fd];
+        static struct dirent tmp;
+        struct stat stats;
+        char buf[255];
+        buf[0] = 255;
+        plfs_error_t err = plfs_readdir_c(plfs_dir->plfs_dirp, buf, 255);
+        if (err == PLFS_SUCCESS) {
+            if (buf[0] == 0) {
+                ret = NULL;
+            }
+            else {
+                printf("BUFFER: %s\n", buf);
+                printf("RPATH: %s\n", plfs_dir->real_path);
+                int _len_path = strlen(plfs_dir->real_path);
+                int _len_buf = strlen(buf);
+                char* t_path = (char*)malloc(sizeof(char)*(_len_path+_len_buf+1));
+                memcpy(t_path, plfs_dir->real_path, _len_path*sizeof(char));
+                memcpy(t_path+_len_path, buf, _len_buf);
+                t_path[_len_buf+_len_path] = '\0';
+                printf("TPATH: %s\n", t_path);
+                plfs_getattr(NULL, t_path, &stats, 0);
+                tmp.d_ino = stats.st_ino;
+                sprintf(tmp.d_name, "%s", buf);
+                ret = &tmp;
+                free(t_path);
+                plfs_dir->current_pos++;
+            }
+        }
+        else {
+            ret = NULL;
+            errno = errno_to_plfs_error(err);
+        }
+	} else {
+		ret = real_readdir(dirp);
+	}
+	return ret;
+}
+
+
+void rewinddir(DIR *dirp) {
+    if (real_rewinddir == NULL) real_rewinddir = (void (*)(DIR*))dlsym(RTLD_NEXT, "rewinddir");
+
+    int fd = dirfd(dirp);
+    if (fd_dir_table.count(fd) != 0) {
+        Plfs_dir* plfs_dir = fd_dir_table[fd];
+        plfs_closedir_c(plfs_dir->plfs_dirp);
+        plfs_dir->plfs_dirp = NULL;
+        plfs_opendir_c(plfs_dir->real_path, &plfs_dir->plfs_dirp);
+    }
+    else {
+        return real_rewinddir(dirp);
+    }
+    return;
+}
+
+
+void seekdir(DIR *dirp, long offset) {
+    if (real_seekdir == NULL) real_seekdir = (void (*)(DIR*, long))dlsym(RTLD_NEXT, "seekdir");
+
+    int fd = dirfd(dirp);
+    if (fd_dir_table.count(fd) != 0) {
+        rewinddir(dirp);
+        for (long i=0; i<offset; i++) readdir(dirp);
+    }
+    else {
+        return real_seekdir(dirp, offset);
+    }
+}
+
+
+long telldir(DIR *dirp) {
+    if (real_telldir == NULL) real_telldir = (long (*)(DIR*))dlsym(RTLD_NEXT, "telldir");
+    
+    long ret = 0;
+    int fd = dirfd(dirp);
+    if (fd_dir_table.count(fd) != 0) {
+        Plfs_dir* plfs_dir = fd_dir_table[fd];
+        ret = plfs_dir->current_pos;
+    }
+    else {
+        ret = real_telldir(dirp);
+    }
+    return ret;
+}
+
+
+int mkdir(const char *pathname, mode_t mode) {
+    if (real_mkdir == NULL) real_mkdir = (int (*)(const char*, mode_t))dlsym(RTLD_NEXT, "mkdir");
+    
+    int ret = 0;
+    char* real_path = normalize_path(pathname);
+    if (is_plfs_path(real_path)) {
+        plfs_error_t err = plfs_mkdir(real_path, mode);
+        if (err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+            ret = -1;
+        } else {
+            ret = 0;
+        }
+    } else {
+        ret = real_mkdir(pathname, mode);
+    }
+    
+    free(real_path);
+
+    return ret;
+}
+
+int rmdir(const char *pathname) {
+    if (real_rmdir == NULL) real_rmdir = (int (*)(const char*))dlsym(RTLD_NEXT, "rmdir");
+    
+    int ret = 0;
+    char *real_path = normalize_path(pathname);
+    if (is_plfs_path(real_path)) {
+        plfs_error_t err = plfs_rmdir(real_path);
+        if(err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+            ret = -1;
+        } else {
+            ret = 0;
+        }
+    } else {
+        ret = real_rmdir(pathname);
+    }
+    
+    free(real_path);
+
+    return ret;
+}
