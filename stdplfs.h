@@ -50,6 +50,12 @@ static int (*real_fcntl)(int, int, ...) = NULL;
 static int (*real_ftruncate)(int, off_t) = NULL;
 static DIR* (*real_opendir)(const char*) = NULL;
 static int (*real_closedir)(DIR*) = NULL;
+static struct dirent* (*real_readdir)(DIR*) = NULL;
+static void (*real_rewinddir)(DIR*) = NULL;
+static void (*real_seekdir)(DIR*, long) = NULL;
+static long (*real_telldir)(DIR*) = NULL;
+static int (*real_mkdir)(const char*, mode_t) = NULL;
+static int (*real_rmdir)(const char*) = NULL;
 
 
 struct Plfs_file {
@@ -63,6 +69,7 @@ struct Plfs_file {
 struct Plfs_dir {
     char* real_path;
     Plfs_dirp* plfs_dirp;
+    int current_pos;
 };
 
 std::map<unsigned long, Plfs_file*> path_file_table;
