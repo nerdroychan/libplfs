@@ -3,6 +3,8 @@
 #include <dirent.h>
 
 static int (*real_open)(const char*, int, ...) = NULL;
+static int (*real_open64)(const char*, int, ...) = NULL;
+
 static int (*real_close)(int) = NULL;
 static ssize_t (*real_read)(int, void*, size_t) = NULL;
 static ssize_t (*real_write)(int, const void*, size_t) = NULL;
@@ -21,6 +23,8 @@ static int (*real_futimes)(int, const struct timeval[2]) = NULL;
 static int (*real_futimens)(int, const struct timespec[2]) = NULL;
 static ssize_t (*real_pread)(int, void*, size_t, off_t) = NULL;
 static ssize_t (*real_pwrite)(int, const void*, size_t, off_t) = NULL;
+static ssize_t (*real_pread64)(int, void*, size_t, off_t) = NULL;
+static ssize_t (*real_pwrite64)(int, const void*, size_t, off_t) = NULL;
 static int (*real_truncate)(const char*, off_t) = NULL;
 static void (*real_sync)() = NULL;
 static int (*real_syncfs)(int) = NULL;
