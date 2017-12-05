@@ -1,3 +1,4 @@
+#include "plfs.h"
 #include "libplfs.h"
 #include <dlfcn.h>
 #include <stdio.h>
@@ -17,7 +18,18 @@
         free the returned string in case of memory leak
 */
 
+int is_plfs_path(const char* path) {
+    if (strncmp(path, "/mnt/plfs", 9) == 0) return 1;
+    return 0;
+}
+
 char* normalize_path(const char* path) {
+    char* _t = (char*)malloc(sizeof(char)*(strlen(path)+1));
+    memcpy(_t, path, sizeof(char)*(strlen(path)+1));
+    return _t;
+
+
+
     if (path == NULL) return NULL;
     int path_len = strlen(path);
     if (path_len < 1) return NULL;
@@ -164,8 +176,46 @@ int open(const char *path, int oflags, ...) {
         return -1;
     }
     if (is_plfs_path(real_path) == 0) {
+        //printf("%d %s\n", is_plfs_path("/mnt/plfs/t1"), "/mnt/plfs/t1");
+        //printf("%d %s\n", is_plfs_path(path), path);
+        //printf("****\n\n\nfuck: ~%s~\n\n\n***\n", real_path);
         free(real_path);
         return real_open(path, oflags, mode);
+    }
+    FILE* file = normalized_plfs_open(real_path, oflags, mode);
+    if (file == NULL) {
+        // printf("open() failed\n");
+        return -1;
+    }
+    int fake_fd = fileno(file);
+    // printf("open() succeed with fd %d\n", fake_fd);
+    fd_cfile_table[fake_fd] = file;
+    return fake_fd;
+}
+
+
+int open64(const char* path, int oflags, ...) {
+    // printf("open() %s\n", path);
+    real_open64 = (int (*)(const char*, int, ...))dlsym(RTLD_NEXT, "open64");
+
+    mode_t mode = 0;
+    if ((oflags & O_CREAT) == O_CREAT) {
+        va_list args;
+        va_start(args, oflags);
+        mode = va_arg(args, mode_t);
+        va_end(args);
+    }
+
+    char* real_path = normalize_path(path);
+    if (real_path == NULL) {
+        return -1;
+    }
+    if (is_plfs_path(real_path) == 0) {
+        //printf("%d %s\n", is_plfs_path("/mnt/plfs/t1"), "/mnt/plfs/t1");
+        //printf("%d %s\n", is_plfs_path(path), path);
+        //printf("****\n\n\nfuck: ~%s~\n\n\n***\n", real_path);
+        free(real_path);
+        return real_open64(path, oflags, mode);
     }
     FILE* file = normalized_plfs_open(real_path, oflags, mode);
     if (file == NULL) {
@@ -591,12 +641,54 @@ ssize_t pread(int fd, void *buf, size_t count, off_t offset) {
 }
 
 
+ssize_t pread64(int fd, void *buf, size_t count, off_t offset) {
+    real_pread64 = (ssize_t (*)(int, void*, size_t, off_t))dlsym(RTLD_NEXT, "pread64");
+
+    ssize_t ret;
+    if (fd_file_table.count(fd) == 0) {
+        ret = real_pread64(fd, buf, count, offset);
+    }
+    else {
+        Plfs_file* plfs_file = fd_file_table[fd];
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_read(plfs_file->plfs_fd, (char*)buf, count, offset, &ret);
+        }
+        if (err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+        }
+    }
+    return ret;
+}
+
+
 ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset) {
     real_pwrite = (ssize_t (*)(int, const void*, size_t, off_t))dlsym(RTLD_NEXT, "pwrite");
 
     ssize_t ret;
     if (fd_file_table.count(fd) == 0) {
         ret = real_pwrite(fd, buf, count, offset);
+    }
+    else {
+        Plfs_file* plfs_file = fd_file_table[fd];
+        plfs_error_t err = PLFS_EAGAIN;
+        while (err == PLFS_EAGAIN) {
+            err = plfs_write(plfs_file->plfs_fd, (const char*)buf, count, offset, getpid(), &ret);
+        }
+        if (err != PLFS_SUCCESS) {
+            errno = plfs_error_to_errno(err);
+        }
+    }
+    return ret;
+}
+
+
+ssize_t pwrite64(int fd, const void *buf, size_t count, off_t offset) {
+    real_pwrite64 = (ssize_t (*)(int, const void*, size_t, off_t))dlsym(RTLD_NEXT, "pwrite64");
+
+    ssize_t ret;
+    if (fd_file_table.count(fd) == 0) {
+        ret = real_pwrite64(fd, buf, count, offset);
     }
     else {
         Plfs_file* plfs_file = fd_file_table[fd];
