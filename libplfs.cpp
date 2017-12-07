@@ -214,66 +214,6 @@ char* normalize_path(const char* path) {
 }
 
 
-    if (path == NULL) return NULL;
-    int path_len = strlen(path);
-    if (path_len < 1) return NULL;
-
-    char* str = (char*)malloc(sizeof(char)*(path_len+1));
-    memcpy(str, path, sizeof(char)*(path_len+1));
-    
-    if (str[0] != '/') { // need cwd
-        char* cwd = getcwd(NULL, 0);
-        int cwd_len = strlen(cwd);
-        cwd = (char*)realloc(cwd, sizeof(char)*(path_len+cwd_len+2));
-        cwd[cwd_len] = '/';
-        memcpy(cwd+cwd_len+1, str, sizeof(char)*(path_len+1));
-        free(str);
-        str = cwd;
-    }
-
-    bool is_directory = (str[strlen(str)-1] == '/');
-
-    char* buf[255];
-    memset(buf, 0, sizeof(char*)*255);
-    char *token = strtok(str, "/");
-    int counter = 0;
-    while (token != NULL) {
-        if (strcmp(token, ".") == 0) {
-            token = strtok(NULL, "/");
-            continue;
-        }
-        if (strncmp(token, "..", 2) != 0) {
-            buf[counter++] = token;
-        }
-        else {
-            counter--;
-            for (int i=2; i<strlen(token); i++) {
-                if (token[i] == '.') counter--;
-            }
-        }
-        if (counter < 0) return NULL;
-        token = strtok(NULL, "/");
-    }
-    int out_len = 0;
-    for (int i=0; i<counter; i++) {
-        out_len += strlen(buf[i]);
-    }
-    char* out_str = (char*)malloc(sizeof(char)*(out_len+counter+1));
-    int t = 0;
-    for (int i=0; i<counter; i++) {
-        out_str[t++] = '/';
-        int t_len = strlen(buf[i]);
-        memcpy(out_str+t, buf[i], t_len);
-        t += t_len;
-    }
-    if (is_directory) {
-        out_str = (char*)realloc(out_str, sizeof(char)*(++out_len+counter+1));
-        out_str[out_len+counter-1] = '/';
-    }
-    out_str[out_len+counter] = '\0';
-    free(str);
-    return out_str;
-}
 
 
 /*
