@@ -59,18 +59,20 @@ void _reverse_string(char * str) {
         tmp = str[i];
         str[i] = str[j];
         str[j] = tmp;
+        i++;
+        j--;
     }
 
 }
 
-int _reverse_path(char * src, char * dst, int skip) {
+unsigned _reverse_path(char * src, char * dst, int skip) {
 
     int i = 0, j = strlen(src) - 1, b = 0, k = 0;
-    char buf[256];
+    char buf[256] = {'\0'};
     unsigned skip_next_level = skip;
 
-
     while (j >= 0) {
+        
         // path name component
         if (src[j] != '/') {
             buf[b++] = src[j];
@@ -78,9 +80,13 @@ int _reverse_path(char * src, char * dst, int skip) {
         }
         // reached path delimiter /
         else if (b) {
+
             // Return up
             if (strcmp(buf, "..") == 0) {
                 skip_next_level += 1;
+            }
+            else if (strcmp(buf, ".") == 0) {
+                // Nothing to do
             }
             // If previous iteration was ..
             else if (skip_next_level != 0) {
@@ -91,17 +97,42 @@ int _reverse_path(char * src, char * dst, int skip) {
                 while (k < b) {
                     dst[i++] = buf[k++];
                 }
-                b = 0;
-                buf[0] = '\0';
                 dst[i++] = '/';
-                k = 0;
             }
+            b = 0;
+            buf[0] = '\0';
+            k = 0;
         }
         // otherwise just ignore the delimiter
+        j--;
+    }
+
+    if (b) {
+        if (strcmp(buf, "..") == 0) {
+            skip_next_level += 1;
+        }
+        else if (strcmp(buf, ".") == 0) {
+                // Nothing to do
+        }
+        // If previous iteration was ..
+        else if (skip_next_level != 0) {
+            skip_next_level -= 1;
+        }
+        // Otherwise normal procedure
+        else {
+            while (k < b) {
+                dst[i++] = buf[k++];
+            }
+            
+        }
+        b = 0;
+        buf[0] = '\0';
+        dst[i++] = '/';
+        k = 0;
     }
 
     dst[i] = '\0'; // string ending NULL terminator
-
+    return skip_next_level;
 }
 
 char * _norm_rel_path_malloc(char * cwd, char * relpath) {
@@ -158,23 +189,29 @@ char* normalize_path(const char* path) {
 
     // If already absolute path, i.e. starting with '/'
     if (raw[0] == '/') {
-        ret = (char *) malloc(sizeof(char) * (strlen(raw) + 1));
-        memcpy(ret, raw, (strlen(raw) + 1));
+        wd = NULL;
+    }
+    // Home
+    else if (raw[0] == '~' && raw[1] == '/') {
+        // FIXME: wd to be home path
+        wd = NULL;
     }
     // Otherwise relative path
     else {
         // FIXME: glibc extension, should use strict POSIX semantics.
         wd = getcwd(NULL, 0);
-        // FIXME: malloc used in function, should check for NULL
-        ret = _norm_rel_path_malloc(wd, raw);
-        if (wd)
-            free(wd);
+        //if (raw[0] == '.' && raw[1] == '/') {
+        //    raw = raw + 2;
+        //}
     }
 
-    return ret;
-    
+    // FIXME: malloc used in function, should check for NULL
+    ret = _norm_rel_path_malloc(wd, raw);
+    if (wd)
+        free(wd);
 
-    
+    return ret;
+}
 
 
     if (path == NULL) return NULL;
