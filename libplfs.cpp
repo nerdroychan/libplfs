@@ -24,11 +24,157 @@ int is_plfs_path(const char* path) {
     return 0;
 }
 
-char* normalize_path(const char* path) {
-    char* _t = (char*)malloc(sizeof(char)*(strlen(path)+1));
-    memcpy(_t, path, sizeof(char)*(strlen(path)+1));
-    return _t;
+static int char_is_whitespace(const char c) {
+    return (c == ' ' || c == '\n' || c == '\t' || c == '\r');
+}
 
+char * trim_no_malloc(char * str) {
+    
+    char * end;
+
+    if (!str) return NULL;
+    
+    size_t len = strlen(str);
+
+    while ((len--) > 0 && char_is_whitespace(*str)) str++;
+
+    end = str + strlen(str) - 1;
+    while (char_is_whitespace(*end)) end--;
+
+    *(end + 1) = '\0';
+
+    return str;
+}
+
+void _reverse_string(char * str) {
+    
+    int i = 0, j;
+    char tmp;
+
+    if (!str) return;
+    
+    j = strlen(str) - 1;
+    
+    while (i < j) {
+        tmp = str[i];
+        str[i] = str[j];
+        str[j] = tmp;
+    }
+
+}
+
+int _reverse_path(char * src, char * dst, int skip) {
+
+    int i = 0, j = strlen(src) - 1, b = 0, k = 0;
+    char buf[256];
+    unsigned skip_next_level = skip;
+
+
+    while (j >= 0) {
+        // path name component
+        if (src[j] != '/') {
+            buf[b++] = src[j];
+            buf[b] = '\0';
+        }
+        // reached path delimiter /
+        else if (b) {
+            // Return up
+            if (strcmp(buf, "..") == 0) {
+                skip_next_level += 1;
+            }
+            // If previous iteration was ..
+            else if (skip_next_level != 0) {
+                skip_next_level -= 1;
+            }
+            // Otherwise normal procedure
+            else {
+                while (k < b) {
+                    dst[i++] = buf[k++];
+                }
+                b = 0;
+                buf[0] = '\0';
+                dst[i++] = '/';
+                k = 0;
+            }
+        }
+        // otherwise just ignore the delimiter
+    }
+
+    dst[i] = '\0'; // string ending NULL terminator
+
+}
+
+char * _norm_rel_path_malloc(char * cwd, char * relpath) {
+
+    char * ret = NULL;
+    int path_skips = 0;
+
+    if (!cwd || !relpath)
+        return NULL;    
+    
+    // Allocate string to be as large as possible
+    do {
+        ret = (char *) malloc(sizeof(char) * (strlen(cwd) + strlen(relpath) + 1));
+    } while (!ret);
+
+    ret[0] = '\0';
+
+    path_skips = _reverse_path(relpath, ret, 0);
+
+    path_skips = _reverse_path(cwd, ret + strlen(ret), path_skips);
+
+    if (path_skips)
+        // Alert 
+    ;
+
+    _reverse_string(ret);
+
+    return ret;
+
+}
+
+
+/// char * normalize_path(const char * path)
+/// Takes a relative path and returns an absolute path 
+char* normalize_path(const char* path) {
+    //char* _t = (char*)malloc(sizeof(char)*(strlen(path)+1));
+    //memcpy(_t, path, sizeof(char)*(strlen(path)+1));
+    //return _t;
+
+    char * raw = NULL; // Raw string stripped of whitespaces
+    char * wd = NULL;  // Current working directory
+    char * ret = NULL; // Return value
+
+    // Error checking for invalid paths
+
+    // Invalid pointer to NULL
+    if (!path) return NULL;
+
+    // Trim string
+    raw = trim_no_malloc((char *)path);
+
+    // If empty string return NULL
+    if (strlen(raw) < 1) return NULL;
+
+    // If already absolute path, i.e. starting with '/'
+    if (raw[0] == '/') {
+        ret = (char *) malloc(sizeof(char) * (strlen(raw) + 1));
+        memcpy(ret, raw, (strlen(raw) + 1));
+    }
+    // Otherwise relative path
+    else {
+        // FIXME: glibc extension, should use strict POSIX semantics.
+        wd = getcwd(NULL, 0);
+        // FIXME: malloc used in function, should check for NULL
+        ret = _norm_rel_path_malloc(wd, raw);
+        if (wd)
+            free(wd);
+    }
+
+    return ret;
+    
+
+    
 
 
     if (path == NULL) return NULL;
@@ -153,7 +299,7 @@ FILE* normalized_plfs_open(const char* path, int oflags, mode_t mode) {
         }
     }
     else {
-        errno = plfs_error_to_errno(err);
+        errno = plfs_error_to_errno(err); 
         ret = NULL;
     }
     return ret;
@@ -471,7 +617,8 @@ int creat(const char* path, mode_t mode) {
 
 
 int dup(int oldfd) {
-    real_dup = (int (*)(int))dlsym(RTLD_NEXT, "dup");
+    if(!real_dup)
+        real_dup = (int (*)(int))dlsym(RTLD_NEXT, "dup");
 
     int ret = real_dup(oldfd);
     if (ret >= 0 && fd_file_table.count(oldfd) != 0) {
@@ -482,7 +629,8 @@ int dup(int oldfd) {
 
 
 int dup2(int oldfd, int newfd) {
-    real_dup2 = (int (*)(int, int))dlsym(RTLD_NEXT, "dup2");
+    if (!real_dup2)
+        real_dup2 = (int (*)(int, int))dlsym(RTLD_NEXT, "dup2");
 
     if (fd_file_table.count(newfd) != 0) {
         close(newfd);
@@ -496,7 +644,8 @@ int dup2(int oldfd, int newfd) {
 
 
 int dup3(int oldfd, int newfd, int flags) {
-    real_dup3 = (int (*)(int, int, int))dlsym(RTLD_NEXT, "dup3");
+    if (!real_dup3)
+        real_dup3 = (int (*)(int, int, int))dlsym(RTLD_NEXT, "dup3");
 
     if (fd_file_table.count(newfd) != 0) {
         close(newfd);
@@ -510,7 +659,8 @@ int dup3(int oldfd, int newfd, int flags) {
 
 
 int utime(const char *filename, const struct utimbuf *times) {
-    real_utime = (int (*)(const char*, const struct utimbuf*))dlsym(RTLD_NEXT, "utime");
+    if (!real_utime)
+        real_utime = (int (*)(const char*, const struct utimbuf*))dlsym(RTLD_NEXT, "utime");
 
     char* real_path = normalize_path(filename);
     int ret;
